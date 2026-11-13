@@ -1,0 +1,23 @@
+{
+  "name": "Pawsterior",
+  "short_name": "Pawsterior",
+  "description": "Track meditation and the things that shape your mind, alongside how you are actually doing.",
+  "id": "./",
+  "start_url": "./#/meditate",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#151824",
+  "theme_color": "#151824",
+  "categories": ["health", "lifestyle"],
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "icons/maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Meditate", "url": "./#/meditate" },
+    { "name": "Log", "url": "./#/log" }
+  ]
+}

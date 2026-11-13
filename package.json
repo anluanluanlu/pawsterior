@@ -1,0 +1,15 @@
+{
+  "name": "pawsterior",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Track meditation and the things that shape your mind, alongside how you are actually doing.",
+  "type": "module",
+  "scripts": {
+    "start": "node tools/serve.mjs",
+    "test": "node --test \"test/**/*.test.js\"",
+    "icons": "node tools/make-icons.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

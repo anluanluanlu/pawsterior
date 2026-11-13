@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Track meditation and the things that shape your mind, alongside how you're actually doing.">
+  <meta name="theme-color" content="#151824" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f6f4ef" media="(prefers-color-scheme: light)">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Pawsterior</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="styles.css">
+  <script type="module" src="src/app.js"></script>
+</head>
+<body>
+  <header class="top">
+    <a class="brand" href="#/meditate" aria-label="Pawsterior home">
+      <img src="icons/icon.svg" alt="" width="28" height="28">
+      <span>Pawsterior</span>
+    </a>
+    <button class="ghost small" id="install-btn" hidden data-action="install">Install app</button>
+  </header>
+
+  <main id="view" tabindex="-1"></main>
+
+  <nav class="tabs" aria-label="Sections">
+    <a href="#/meditate" data-route="meditate"><span class="ico" aria-hidden="true">◯</span>Meditate</a>
+    <a href="#/log" data-route="log"><span class="ico" aria-hidden="true">＋</span>Log</a>
+    <a href="#/history" data-route="history"><span class="ico" aria-hidden="true">☰</span>History</a>
+    <a href="#/insights" data-route="insights"><span class="ico" aria-hidden="true">◐</span>Insights</a>
+    <a href="#/settings" data-route="settings"><span class="ico" aria-hidden="true">⚙</span>Setup</a>
+  </nav>
+
+  <dialog id="sheet" aria-labelledby="sheet-title"></dialog>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <noscript>Pawsterior needs JavaScript to run.</noscript>
+</body>
+</html>

@@ -1,0 +1,501 @@
+-- allium: 3
+-- pawsterior.allium
+--
+-- Pawsterior: a personal tracker that logs meditation and other
+-- self-defined happenings, alongside self-defined observations of mental
+-- state, so the person can see how the two move together over time.
+--
+-- This spec is the primary artefact. The implementation lives in src/
+-- (model.js mirrors the entities and rules, insights.js the Insights
+-- surface). Keep both aligned when either changes.
+
+------------------------------------------------------------
+-- Config
+------------------------------------------------------------
+
+config {
+    default_meditation_duration: Duration = 10.minutes
+    min_meditation_duration: Duration = 1.minute
+    max_meditation_duration: Duration = 4.hours
+    min_interval_bell: Duration = 1.minute
+    max_type_name_length: Integer = 60
+    max_note_length: Integer = 500
+    min_intensity: Integer = 1
+    max_intensity: Integer = 5
+    future_entry_tolerance: Duration = 1.minute
+    insight_lag: Duration = 1.day
+    min_days_per_insight_group: Integer = 3
+}
+
+------------------------------------------------------------
+-- Enumerations
+------------------------------------------------------------
+
+-- What an entry type describes.
+--   activity:     something the person did or that happened
+--                 (meditation, met friends, drank coffee late)
+--   mental_state: an observation of their mental state
+--                 (couldn't fall asleep, catastrophic thoughts)
+enum EntryKind { activity | mental_state }
+
+-- Whether a mental state suggests good or bad mental health.
+enum Polarity { good | bad }
+
+enum AmbientSound { silence | brown_noise | rain | ocean }
+
+------------------------------------------------------------
+-- External
+------------------------------------------------------------
+
+-- Pawsterior is single-person and local-first: all data stays on the device.
+external entity Person {}
+
+------------------------------------------------------------
+-- Entities
+------------------------------------------------------------
+
+entity EntryType {
+    name: String
+    kind: EntryKind
+    polarity: Polarity?
+    colour: String
+    archived: Boolean
+    is_meditation: Boolean
+
+    entries: Entry with type = this
+
+    is_loggable: not archived
+
+    invariant PolarityOnlyForMentalStates {
+        (kind = mental_state implies polarity != null)
+            and (kind = activity implies polarity = null)
+    }
+
+    invariant MeditationIsAnActivity {
+        is_meditation implies (kind = activity and not archived)
+    }
+}
+
+entity Entry {
+    type: EntryType
+    occurred_at: Timestamp
+    duration: Duration?
+    intensity: Integer?
+    note: String?
+    session: MeditationSession?
+
+    invariant DurationOnlyForActivities {
+        duration != null implies type.kind = activity
+    }
+
+    invariant IntensityInRange {
+        intensity != null implies
+            (intensity >= config.min_intensity and intensity <= config.max_intensity)
+    }
+}
+
+entity MeditationSession {
+    planned_duration: Duration
+    ambient: AmbientSound
+    interval_bell: Duration?
+    status: running | paused | completed | discarded
+    started_at: Timestamp
+    paused_at: Timestamp when status = paused
+    paused_total: Duration
+
+    logged_entry: Entry with session = this
+
+    -- Time actually spent meditating, excluding pauses.
+    elapsed: (if status = paused: paused_at else: now) - started_at - paused_total
+    remaining: planned_duration - elapsed
+    is_due: status = running and elapsed >= planned_duration
+
+    transitions status {
+        running -> paused
+        paused -> running
+        running -> completed
+        paused -> completed
+        running -> discarded
+        paused -> discarded
+        terminal: completed, discarded
+    }
+}
+
+------------------------------------------------------------
+-- Defaults
+------------------------------------------------------------
+
+-- Seeded on first launch. Everything except Meditation can be edited,
+-- archived or deleted; Meditation can be renamed and recoloured only.
+
+default EntryType meditation = {
+    name: "Meditation", kind: activity, polarity: null,
+    colour: "#7c9cff", archived: false, is_meditation: true
+}
+
+default EntryType met_friends = {
+    name: "Met friends", kind: activity, polarity: null,
+    colour: "#5cc8a8", archived: false, is_meditation: false
+}
+
+default EntryType could_not_sleep = {
+    name: "Couldn't fall asleep", kind: mental_state, polarity: bad,
+    colour: "#e07a7a", archived: false, is_meditation: false
+}
+
+default EntryType catastrophic_thoughts = {
+    name: "Catastrophic thoughts", kind: mental_state, polarity: bad,
+    colour: "#d9a05b", archived: false, is_meditation: false
+}
+
+default EntryType felt_calm = {
+    name: "Felt calm", kind: mental_state, polarity: good,
+    colour: "#8fd16a", archived: false, is_meditation: false
+}
+
+------------------------------------------------------------
+-- Rules: entry types
+------------------------------------------------------------
+
+rule DefineEntryType {
+    when: DefineEntryType(name, kind, polarity?, colour)
+
+    requires: name.length > 0 and name.length <= config.max_type_name_length
+    requires: not exists EntryType{name: name}
+    requires: kind = mental_state implies polarity != null
+
+    ensures:
+        EntryType.created(
+            name: name,
+            kind: kind,
+            polarity: if kind = mental_state: polarity else: null,
+            colour: colour,
+            archived: false,
+            is_meditation: false
+        )
+
+    @guidance
+        -- Name uniqueness is case-insensitive and ignores surrounding whitespace.
+}
+
+rule EditEntryType {
+    when: EditEntryType(type, name, kind, polarity?, colour)
+
+    requires: name.length > 0 and name.length <= config.max_type_name_length
+    requires: not exists EntryType{name: name} or EntryType{name: name} = type
+    -- The kind of a type is fixed once anything has been logged against it,
+    -- so history never silently changes meaning.
+    requires: kind = type.kind or type.entries.count = 0
+    requires: not type.is_meditation or kind = activity
+    requires: kind = mental_state implies polarity != null
+
+    ensures:
+        type.name = name
+        type.kind = kind
+        type.polarity = if kind = mental_state: polarity else: null
+        type.colour = colour
+}
+
+rule ArchiveEntryType {
+    when: ArchiveEntryType(type)
+
+    requires: not type.archived
+    requires: not type.is_meditation
+
+    ensures: type.archived = true
+
+    @guidance
+        -- Archived types disappear from quick logging but keep their history
+        -- and still take part in insights.
+}
+
+rule RestoreEntryType {
+    when: RestoreEntryType(type)
+    requires: type.archived
+    ensures: type.archived = false
+}
+
+rule DeleteEntryType {
+    when: DeleteEntryType(type)
+
+    requires: not type.is_meditation
+    requires: type.entries.count = 0
+
+    ensures: not exists type
+}
+
+------------------------------------------------------------
+-- Rules: entries
+------------------------------------------------------------
+
+rule LogEntry {
+    when: LogEntry(type, occurred_at, duration?, intensity?, note?)
+
+    requires: type.is_loggable
+    requires: occurred_at <= now + config.future_entry_tolerance
+    requires: duration = null or (type.kind = activity and duration > 0.seconds)
+    requires: intensity = null
+        or (intensity >= config.min_intensity and intensity <= config.max_intensity)
+    requires: note = null or note.length <= config.max_note_length
+
+    ensures:
+        Entry.created(
+            type: type, occurred_at: occurred_at, duration: duration,
+            intensity: intensity, note: note, session: null
+        )
+}
+
+rule EditEntry {
+    when: EditEntry(entry, occurred_at, duration?, intensity?, note?)
+
+    requires: occurred_at <= now + config.future_entry_tolerance
+    requires: duration = null or (entry.type.kind = activity and duration > 0.seconds)
+    requires: intensity = null
+        or (intensity >= config.min_intensity and intensity <= config.max_intensity)
+    requires: note = null or note.length <= config.max_note_length
+
+    ensures:
+        entry.occurred_at = occurred_at
+        entry.duration = duration
+        entry.intensity = intensity
+        entry.note = note
+}
+
+rule DeleteEntry {
+    when: DeleteEntry(entry)
+    ensures: not exists entry
+}
+
+------------------------------------------------------------
+-- Rules: meditation sessions
+------------------------------------------------------------
+
+rule StartMeditation {
+    when: StartMeditation(planned_duration, ambient, interval_bell?)
+
+    requires: not exists MeditationSession{status: running}
+    requires: not exists MeditationSession{status: paused}
+    requires: planned_duration >= config.min_meditation_duration
+    requires: planned_duration <= config.max_meditation_duration
+    requires: interval_bell = null
+        or (interval_bell >= config.min_interval_bell and interval_bell < planned_duration)
+
+    ensures:
+        MeditationSession.created(
+            planned_duration: planned_duration,
+            ambient: ambient,
+            interval_bell: interval_bell,
+            status: running,
+            started_at: now,
+            paused_total: 0.seconds
+        )
+
+    @guidance
+        -- Ring a bell at the start. Play the ambient sound while running.
+        -- Ring a soft bell every interval_bell of elapsed time, and a deep
+        -- bell at the end. Schedule bells on the audio clock so they stay
+        -- on time when the page is in the background, and keep the screen
+        -- awake while a session runs where the platform allows.
+}
+
+rule PauseMeditation {
+    when: PauseMeditation(session)
+    requires: session.status = running
+    ensures:
+        session.status = paused
+        session.paused_at = now
+    @guidance
+        -- Fade the ambient sound out and cancel scheduled bells.
+}
+
+rule ResumeMeditation {
+    when: ResumeMeditation(session)
+    requires: session.status = paused
+    ensures:
+        session.paused_total = session.paused_total + (now - session.paused_at)
+        session.status = running
+        session.paused_at = null
+}
+
+rule MeditationTimeIsUp {
+    when: session: MeditationSession.is_due
+    requires: session.status = running
+    ensures: SessionEnded(session: session)
+}
+
+rule FinishMeditationEarly {
+    when: FinishMeditationEarly(session)
+    requires: session.status in {running, paused}
+    requires: session.elapsed >= config.min_meditation_duration
+    ensures: SessionEnded(session: session)
+    @guidance
+        -- If less than the minimum has elapsed, offer to discard instead.
+}
+
+rule LogFinishedMeditation {
+    when: SessionEnded(session)
+
+    let meditation = EntryType{is_meditation: true}
+
+    ensures:
+        Entry.created(
+            type: meditation,
+            occurred_at: session.started_at,
+            duration: if session.elapsed > session.planned_duration:
+                          session.planned_duration
+                      else: session.elapsed,
+            intensity: null,
+            note: null,
+            session: session
+        )
+        session.status = completed
+        session.paused_at = null
+}
+
+rule DiscardMeditation {
+    when: DiscardMeditation(session)
+    requires: session.status in {running, paused}
+    ensures:
+        session.status = discarded
+        session.paused_at = null
+    @guidance
+        -- A discarded session leaves no entry behind.
+}
+
+------------------------------------------------------------
+-- Rules: data portability
+------------------------------------------------------------
+
+rule ImportData {
+    when: ImportData(snapshot)
+    requires: Snapshot.is_valid(snapshot)
+    ensures: Snapshot.replace_all(snapshot)
+    @guidance
+        -- Import replaces everything after an explicit confirmation.
+        -- Export is a read-only JSON download of every type, entry and setting.
+}
+
+------------------------------------------------------------
+-- Invariants
+------------------------------------------------------------
+
+invariant ExactlyOneMeditationType {
+    (EntryTypes where is_meditation).count = 1
+}
+
+invariant AtMostOneActiveSession {
+    (MeditationSessions where status in {running, paused}).count <= 1
+}
+
+invariant CompletedSessionsAreLogged {
+    for s in MeditationSessions:
+        s.status = completed implies exists s.logged_entry
+}
+
+invariant DiscardedSessionsLeaveNoEntry {
+    for s in MeditationSessions:
+        s.status = discarded implies not exists s.logged_entry
+}
+
+------------------------------------------------------------
+-- Actors and Surfaces
+------------------------------------------------------------
+
+actor Owner {
+    identified_by: Person
+}
+
+surface Meditate {
+    facing owner: Owner
+
+    exposes:
+        config.default_meditation_duration
+
+    provides:
+        StartMeditation(planned_duration, ambient, interval_bell)
+        for session in MeditationSessions where status in {running, paused}:
+            PauseMeditation(session)
+            ResumeMeditation(session)
+            FinishMeditationEarly(session)
+            DiscardMeditation(session)
+
+    @guarantee SurvivesReload
+        -- A running or paused session is persisted and resumes after reload.
+
+    @guidance
+        -- Show remaining time large and calm. After a session ends, invite
+        -- the person to log how they feel.
+}
+
+surface Log {
+    facing owner: Owner
+
+    exposes:
+        EntryTypes where is_loggable
+
+    provides:
+        for type in EntryTypes where is_loggable:
+            LogEntry(type, occurred_at, duration, intensity, note)
+        DefineEntryType(name, kind, polarity, colour)
+
+    @guidance
+        -- Logging should be one tap plus an optional detail sheet.
+        -- Group activities and mental states; tint good and bad states apart.
+}
+
+surface History {
+    facing owner: Owner
+
+    exposes:
+        Entries
+
+    provides:
+        for entry in Entries:
+            EditEntry(entry, occurred_at, duration, intensity, note)
+            DeleteEntry(entry)
+}
+
+surface ManageTypes {
+    facing owner: Owner
+
+    exposes:
+        EntryTypes
+
+    provides:
+        for type in EntryTypes:
+            EditEntryType(type, name, kind, polarity, colour)
+            ArchiveEntryType(type)
+            RestoreEntryType(type)
+            DeleteEntryType(type)
+        ImportData(snapshot)
+}
+
+surface Insights {
+    facing owner: Owner
+
+    exposes:
+        Entries
+        EntryTypes
+
+    @guidance
+        -- Work in local calendar days, from the first logged day to today.
+        -- For every pair (activity A, mental state S): a day is "with A" when
+        -- A was logged that day or within config.insight_lag before it.
+        -- Report the share of days-with-A on which S was logged against the
+        -- share of the other days on which S was logged. Hide pairs where
+        -- either group has fewer than config.min_days_per_insight_group days.
+        -- Rank by the size of the difference. A difference is favourable
+        -- when a good state is more common, or a bad state less common, with A.
+        -- Always state that this shows association, not cause.
+}
+
+------------------------------------------------------------
+-- Deferred and Open Questions
+------------------------------------------------------------
+
+deferred Snapshot.is_valid       -- see: src/model.js importState
+deferred Snapshot.replace_all    -- see: src/model.js importState
+
+open question "Should intensity weight insights, or stay descriptive only?"
+open question "Should data sync across devices, and if so, end-to-end encrypted?"
+open question "Should the person be reminded to log, e.g. a daily check-in notification?"
