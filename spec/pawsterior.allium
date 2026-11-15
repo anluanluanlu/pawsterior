@@ -50,6 +50,9 @@ enum AmbientSound { silence | brown_noise | rain | ocean }
 -- Pawsterior is single-person and local-first: all data stays on the device.
 external entity Person {}
 
+-- A backup file produced by Export and read by Import.
+external entity Snapshot {}
+
 ------------------------------------------------------------
 -- Entities
 ------------------------------------------------------------
@@ -236,7 +239,7 @@ rule LogEntry {
     requires: duration = null or (type.kind = activity and duration > 0.seconds)
     requires: intensity = null
         or (intensity >= config.min_intensity and intensity <= config.max_intensity)
-    requires: note = null or note.length <= config.max_note_length
+    requires: note = null or length(note) <= config.max_note_length
 
     ensures:
         Entry.created(
@@ -252,7 +255,7 @@ rule EditEntry {
     requires: duration = null or (entry.type.kind = activity and duration > 0.seconds)
     requires: intensity = null
         or (intensity >= config.min_intensity and intensity <= config.max_intensity)
-    requires: note = null or note.length <= config.max_note_length
+    requires: note = null or length(note) <= config.max_note_length
 
     ensures:
         entry.occurred_at = occurred_at
@@ -263,7 +266,11 @@ rule EditEntry {
 
 rule DeleteEntry {
     when: DeleteEntry(entry)
-    ensures: not exists entry
+    ensures:
+        not exists entry
+        -- A session's entry is its only trace, so deleting the entry
+        -- deletes the session too and CompletedSessionsAreLogged holds.
+        if entry.session != null: not exists entry.session
 }
 
 ------------------------------------------------------------
@@ -325,7 +332,7 @@ rule MeditationTimeIsUp {
 
 rule FinishMeditationEarly {
     when: FinishMeditationEarly(session)
-    requires: session.status in {running, paused}
+    requires: session.status = running or session.status = paused
     requires: session.elapsed >= config.min_meditation_duration
     ensures: SessionEnded(session: session)
     @guidance
@@ -334,6 +341,7 @@ rule FinishMeditationEarly {
 
 rule LogFinishedMeditation {
     when: SessionEnded(session)
+    requires: session.status = running or session.status = paused
 
     let meditation = EntryType{is_meditation: true}
 
@@ -354,7 +362,7 @@ rule LogFinishedMeditation {
 
 rule DiscardMeditation {
     when: DiscardMeditation(session)
-    requires: session.status in {running, paused}
+    requires: session.status = running or session.status = paused
     ensures:
         session.status = discarded
         session.paused_at = null
@@ -406,10 +414,13 @@ actor Owner {
 }
 
 surface Meditate {
-    facing owner: Owner
+    facing _: Owner
 
     exposes:
         config.default_meditation_duration
+        for session in MeditationSessions where status in {running, paused}:
+            session.remaining
+            session.status
 
     provides:
         StartMeditation(planned_duration, ambient, interval_bell)
@@ -428,7 +439,7 @@ surface Meditate {
 }
 
 surface Log {
-    facing owner: Owner
+    facing _: Owner
 
     exposes:
         EntryTypes where is_loggable
@@ -444,7 +455,7 @@ surface Log {
 }
 
 surface History {
-    facing owner: Owner
+    facing _: Owner
 
     exposes:
         Entries
@@ -456,7 +467,7 @@ surface History {
 }
 
 surface ManageTypes {
-    facing owner: Owner
+    facing _: Owner
 
     exposes:
         EntryTypes
@@ -471,7 +482,7 @@ surface ManageTypes {
 }
 
 surface Insights {
-    facing owner: Owner
+    facing _: Owner
 
     exposes:
         Entries
@@ -487,6 +498,8 @@ surface Insights {
         -- Rank by the size of the difference. A difference is favourable
         -- when a good state is more common, or a bad state less common, with A.
         -- Always state that this shows association, not cause.
+        -- Intensity is descriptive only: it never weights insights, which
+        -- count presence or absence per day.
 }
 
 ------------------------------------------------------------
@@ -496,6 +509,8 @@ surface Insights {
 deferred Snapshot.is_valid       -- see: src/model.js importState
 deferred Snapshot.replace_all    -- see: src/model.js importState
 
-open question "Should intensity weight insights, or stay descriptive only?"
-open question "Should data sync across devices, and if so, end-to-end encrypted?"
-open question "Should the person be reminded to log, e.g. a daily check-in notification?"
+-- Decided 2026-11-13: intensity stays descriptive only (see Insights).
+-- Decided 2026-11-13: no sync; data stays on one device, and Export/Import
+-- is the only way to move it.
+-- Decided 2026-11-14: no reminders; Pawsterior never prompts the person to
+-- meditate or log. Logging is always self-initiated.

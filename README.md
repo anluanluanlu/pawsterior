@@ -22,7 +22,7 @@ The behaviour is specified in [`spec/pawsterior.allium`](spec/pawsterior.allium)
 - [`src/insights.js`](src/insights.js) implements the `Insights` surface.
 - The tests in [`test/`](test) check the rules and invariants.
 
-When behaviour changes, update the spec first, then the code. With the Allium skill installed in Claude Code (`/plugin marketplace add juxt/claude-plugins`, then `/plugin install allium`), `/allium:weed` finds places where the spec and the code have drifted apart. `/allium:propagate` generates tests from the spec. The optional `allium` CLI (from [juxt/allium-tools](https://github.com/juxt/allium-tools/releases)) checks the spec's syntax.
+When behaviour changes, update the spec first, then the code. With the Allium skill installed in Claude Code (`/plugin marketplace add juxt/claude-plugins`, then `/plugin install allium`), `/allium:weed` finds places where the spec and the code have drifted apart. `/allium:propagate` generates tests from the spec. The `allium` CLI (from [juxt/allium-tools](https://github.com/juxt/allium-tools/releases)) checks the spec. `npm run spec` runs `allium analyse`, which reports structural errors as well as states a session could get stuck in.
 
 ## Run it
 
