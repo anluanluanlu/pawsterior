@@ -4,13 +4,14 @@
 import * as M from './model.js';
 import { computeInsights, meditationSummary, recentGrid, dayIndex, dayStart } from './insights.js';
 import { SoundEngine } from './sounds.js';
+import { IS_TEST, STORAGE_KEY, APP_TITLE } from './env.js';
+import { demoState } from './seed.js';
 
-const STORAGE_KEY = 'pawsterior:v1';
 const ROUTES = ['meditate', 'log', 'history', 'insights', 'settings'];
 const PALETTE = ['#7c9cff', '#5cc8a8', '#8fd16a', '#e6c84f', '#d9a05b', '#e07a7a',
   '#d77fc4', '#a08cf0', '#5fb7e6', '#9aa4b2', '#c9925f', '#6fcf97'];
 const AMBIENT_LABELS = { silence: 'Silence', brown_noise: 'Brown noise', rain: 'Rain', ocean: 'Ocean' };
-const DURATIONS = [5, 10, 15, 20, 30, 45, 60];
+const DURATIONS = [10, 12, 15];
 const INTERVALS = [0, 1, 2, 5, 10];
 
 const sound = new SoundEngine();
@@ -19,6 +20,7 @@ const $sheet = document.getElementById('sheet');
 const $toast = document.getElementById('toast');
 
 let state = load();
+if (IS_TEST) save(); // persist the sample data right away
 let historyFilter = 'all';
 let insightLag = 1;
 let wakeLock = null;
@@ -31,10 +33,14 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const s = JSON.parse(raw);
-      if (s?.version === M.SCHEMA_VERSION && Array.isArray(s.types) && Array.isArray(s.entries)) return s;
+      if (s?.version === M.SCHEMA_VERSION && Array.isArray(s.types) && Array.isArray(s.entries)) {
+        // Fill in settings added since the data was saved.
+        return { ...s, settings: { ...M.createInitialState().settings, ...s.settings } };
+      }
     }
   } catch { /* fall through to a fresh state */ }
-  return M.createInitialState();
+  // The test build starts with sample entries; the real app starts empty.
+  return IS_TEST ? demoState() : M.createInitialState();
 }
 
 function save() {
@@ -223,9 +229,8 @@ const VIEWS = {
     return `
       <div class="section-head"><h2>Insights</h2></div>
       <div class="stats">
-        <div class="stat"><b>${sum.weekMinutes}</b><span>min this week</span></div>
-        <div class="stat"><b>${sum.weekSessions}</b><span>sessions this week</span></div>
-        <div class="stat"><b>${sum.streak}</b><span>day streak</span></div>
+        <div class="stat"><b>${sum.weekMinutes}</b><span>min in last 7 days</span></div>
+        <div class="stat"><b>${sum.weekDays}</b><span>days meditated in last 7 days</span></div>
       </div>
 
       <h3>Last 3 weeks</h3>
@@ -282,6 +287,12 @@ const VIEWS = {
         <input type="file" id="import-file" accept="application/json,.json" hidden>
       </div>
 
+      ${IS_TEST ? `<h3>Test build</h3>
+      <div class="card small">
+        <p>This is the TEST build. Its data is stored separately from the real app and stays here between visits.</p>
+        <button class="small" data-action="reset-test-data">Regenerate sample data</button>
+      </div>` : ''}
+
       <h3>About</h3>
       <div class="card small">
         <p>Pawsterior tracks meditation and the things that shape your mind, alongside how you're actually doing.</p>
@@ -294,6 +305,7 @@ const VIEWS = {
 function setupView() {
   const s = state.settings;
   const mins = Math.round(s.durationMs / 60000);
+  const warmupMs = s.warmupMs ?? 0;
   const sum = meditationSummary(state);
   return `
     <section class="card">
@@ -302,6 +314,9 @@ function setupView() {
       <div class="chips">${DURATIONS.map((m) => `<button class="chip" aria-pressed="${m === mins}" data-action="set-duration" data-v="${m}">${m} min</button>`).join('')}</div>
       <label class="field" style="margin-top:12px"><span>Or minutes</span>
         <input type="number" inputmode="numeric" min="1" max="240" step="1" value="${mins}" data-change="custom-duration" aria-label="Custom duration in minutes"></label>
+      <h3>Warm-up</h3>
+      <label class="field"><span>Seconds before the timer starts (a wood snap marks the end, 0 for none)</span>
+        <input type="number" inputmode="numeric" min="0" max="300" step="5" value="${Math.round(warmupMs / 1000)}" data-change="custom-warmup" aria-label="Warm-up in seconds"></label>
       <h3>Sound</h3>
       <div class="chips">${M.AMBIENTS.map((a) => `<button class="chip" aria-pressed="${a === s.ambient}" data-action="set-ambient" data-v="${a}">${AMBIENT_LABELS[a]}</button>`).join('')}</div>
       <h3>Interval bell</h3>
@@ -310,9 +325,8 @@ function setupView() {
       <div style="margin-top:22px"><button class="primary big" data-action="start">Begin · ${mins} min</button></div>
     </section>
     <div class="stats">
-      <div class="stat"><b>${sum.weekMinutes}</b><span>min this week</span></div>
-      <div class="stat"><b>${sum.streak}</b><span>day streak</span></div>
-      <div class="stat"><b>${sum.totalSessions}</b><span>sessions</span></div>
+      <div class="stat"><b>${sum.weekMinutes}</b><span>min in last 7 days</span></div>
+      <div class="stat"><b>${sum.weekDays}</b><span>days meditated in last 7 days</span></div>
     </div>`;
 }
 
@@ -330,7 +344,7 @@ function sessionView() {
         </svg>
         <div class="ring-text">
           <div class="time" id="timer-remaining">--:--</div>
-          <div class="sub ${paused ? '' : 'breathe'}">${paused ? 'Paused' : 'Breathe'} · ${esc(fmtDuration(s.plannedMs))} · ${esc(AMBIENT_LABELS[s.ambient])}</div>
+          <div class="sub ${paused ? '' : 'breathe'}" id="timer-sub"></div>
         </div>
       </div>
       ${sound.ready ? '' : `<p><button class="small" data-action="enable-sound">🔔 Turn sound on</button></p>`}
@@ -346,14 +360,23 @@ function sessionView() {
 
 function updateTimer() {
   const s = state.session;
-  if (!s) { document.title = 'Pawsterior'; return; }
-  const remaining = M.sessionRemaining(s);
-  document.title = `${fmtClock(remaining)} · Pawsterior`;
+  if (!s) { document.title = APP_TITLE; return; }
+  const warm = M.sessionWarmupRemaining(s);
+  const warming = warm > 0;
+  // During the warm-up the clock counts down to the start; afterwards it shows the meditation time left.
+  const remaining = warming ? warm : M.sessionRemaining(s);
+  const total = warming ? s.warmupMs : s.plannedMs;
+  document.title = `${fmtClock(remaining)} · ${APP_TITLE}`;
   const $t = document.getElementById('timer-remaining');
   if (!$t) return;
   $t.textContent = fmtClock(remaining);
+  const paused = s.status === 'paused';
+  const phase = warming ? 'Get settled' : 'Breathe';
+  const detail = warming ? `warm-up, then ${fmtDuration(s.plannedMs)}` : fmtDuration(s.plannedMs);
+  document.getElementById('timer-sub').textContent = `${paused ? 'Paused' : phase} · ${detail} · ${AMBIENT_LABELS[s.ambient]}`;
   const ring = document.getElementById('ring-progress');
-  if (ring) ring.style.strokeDashoffset = String(RING_C * (remaining / s.plannedMs));
+  if (ring) ring.style.strokeDashoffset = String(RING_C * (remaining / total));
+  document.querySelector('.session')?.classList.toggle('warmup', warming);
 }
 
 // ================================================================ meditation lifecycle
@@ -362,7 +385,7 @@ function soundForSession() {
   const s = state.session;
   if (!s || s.status !== 'running' || !sound.ready) return;
   sound.startAmbient(s.ambient);
-  sound.scheduleSession(s, M.sessionElapsed(s));
+  sound.scheduleSession(s, M.sessionRawElapsed(s));
 }
 
 async function requestWakeLock() {
@@ -593,11 +616,12 @@ const ACTIONS = {
   'set-interval': (el) => setSetting({ intervalMs: Number(el.dataset.v) * 60000 }),
 
   async start() {
-    const { durationMs, ambient, intervalMs } = state.settings;
+    const { durationMs, ambient, intervalMs, warmupMs } = state.settings;
     const unlocked = sound.unlock();
-    if (!apply((s) => M.startSession(s, { plannedMs: durationMs, ambient, intervalMs: intervalMs < durationMs ? intervalMs : 0 }))) return;
+    if (!apply((s) => M.startSession(s, { plannedMs: durationMs, ambient, intervalMs: intervalMs < durationMs ? intervalMs : 0, warmupMs: warmupMs ?? 0 }))) return;
     await unlocked;
-    sound.bell('start');
+    // With a warm-up the wood snap marks the start of meditation; without one, the bowl does.
+    if (!warmupMs) sound.bell('start');
     soundForSession();
     requestWakeLock();
     render();
@@ -709,6 +733,15 @@ const ACTIONS = {
     render();
     toast('Everything erased.');
   },
+  async 'reset-test-data'() {
+    if (!await confirmSheet({ title: 'Regenerate test data?', body: 'Replaces everything in the TEST build with new random sample entries. Your real data is not affected.', ok: 'Regenerate' })) return;
+    sound.stopAll();
+    releaseWakeLock();
+    state = demoState({ seed: Math.floor(Math.random() * 2 ** 32) });
+    save();
+    render();
+    toast('Sample data regenerated.');
+  },
   async install() {
     if (!installPrompt) return;
     installPrompt.prompt();
@@ -728,6 +761,11 @@ function setSetting(patch) {
 
 const CHANGES = {
   'history-filter': (el) => { historyFilter = el.value; render(); },
+  'custom-warmup': (el) => {
+    const sec = Math.round(Number(el.value));
+    if (el.value === '' || !Number.isFinite(sec) || sec < 0 || sec > 300) { toast('Choose between 0 and 300 seconds.', { error: true }); render(); return; }
+    setSetting({ warmupMs: sec * 1000 });
+  },
   'custom-duration': (el) => {
     const m = Math.round(Number(el.value));
     if (!Number.isFinite(m) || m < 1 || m > 240) { toast('Choose between 1 and 240 minutes.', { error: true }); render(); return; }
@@ -765,5 +803,9 @@ navigator.storage?.persist?.().catch(() => {});
 if (state.session) {
   const { state: next, completed } = M.tickSession(state);
   if (completed) { state = next; save(); toast('Your last session finished while the app was closed. It has been logged.'); }
+}
+if (IS_TEST) {
+  document.body.classList.add('is-test');
+  document.querySelector('.brand span').insertAdjacentHTML('afterend', '<span class="test-badge">TEST</span>');
 }
 render();

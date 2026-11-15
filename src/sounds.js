@@ -69,6 +69,45 @@ export class SoundEngine {
     return handle;
   }
 
+  /** A short dry wood "tok", `delaySec` from now. Marks the end of the warm-up. */
+  snap(delaySec = 0) {
+    if (!this.ctx) return null;
+    const ctx = this.ctx;
+    const t0 = ctx.currentTime + Math.max(0, delaySec) + 0.02;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t0);
+    out.gain.exponentialRampToValueAtTime(0.9, t0 + 0.003);
+    out.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+    out.connect(this.master);
+    // Body: a quickly falling sine, like a knock on a hollow block.
+    const body = ctx.createOscillator();
+    body.type = 'sine';
+    body.frequency.setValueAtTime(950, t0);
+    body.frequency.exponentialRampToValueAtTime(380, t0 + 0.07);
+    const bodyGain = ctx.createGain();
+    bodyGain.gain.value = 0.8;
+    body.connect(bodyGain).connect(out);
+    // Click: a few ms of band-passed noise for the wooden attack.
+    const len = Math.floor(ctx.sampleRate * 0.03);
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const click = ctx.createBufferSource();
+    click.buffer = buf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass';
+    bp.frequency.value = 2200;
+    bp.Q.value = 1.2;
+    click.connect(bp).connect(out);
+    body.start(t0);
+    body.stop(t0 + 0.2);
+    click.start(t0);
+    const handle = { oscs: [body, click], out };
+    this.scheduled.add(handle);
+    body.onended = () => { this.scheduled.delete(handle); out.disconnect(); };
+    return handle;
+  }
+
   cancelBells() {
     for (const h of this.scheduled) {
       for (const o of h.oscs) { try { o.stop(); } catch { /* already stopped */ } }
@@ -77,16 +116,21 @@ export class SoundEngine {
     this.scheduled.clear();
   }
 
-  /** Schedule the interval and end bells for a session with `elapsedMs` already done. */
-  scheduleSession({ plannedMs, intervalMs }, elapsedMs) {
+  /**
+   * Schedule the warm-up snap, interval bells and end bells for a session.
+   * `rawElapsedMs` is the time since the start excluding pauses, warm-up included.
+   */
+  scheduleSession({ plannedMs, intervalMs, warmupMs = 0 }, rawElapsedMs) {
     this.cancelBells();
     if (!this.ctx) return;
+    if (warmupMs > rawElapsedMs + 50) this.snap((warmupMs - rawElapsedMs) / 1000);
     if (intervalMs > 0) {
       for (let t = intervalMs; t < plannedMs; t += intervalMs) {
-        if (t > elapsedMs + 250) this.bell('interval', (t - elapsedMs) / 1000);
+        const at = warmupMs + t;
+        if (at > rawElapsedMs + 250) this.bell('interval', (at - rawElapsedMs) / 1000);
       }
     }
-    const remaining = plannedMs - elapsedMs;
+    const remaining = warmupMs + plannedMs - rawElapsedMs;
     if (remaining > 0) {
       this.bell('end', remaining / 1000);
       this.bell('end', remaining / 1000 + 2.5);

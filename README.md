@@ -4,7 +4,7 @@ Track meditation and the things that shape your mind, alongside how you're actua
 
 Pawsterior is a website you can also install as an app (a Progressive Web App). It works offline, and all data stays on your device.
 
-- **Meditate.** A timer with a singing-bowl bell at the start, optional interval bells, and an end bell. Choose an ambient sound: silence, brown noise, rain or ocean. You can pause, resume, finish early or discard. Each finished session is logged automatically, and afterwards you're asked how you feel.
+- **Meditate.** A timer with an adjustable warm-up (15 s by default, ended by a short wood snap), optional interval bells, and a singing-bowl end bell. Quick durations of 10, 12 or 15 minutes, or type any number. The stats show minutes and days meditated in the last 7 days. Choose an ambient sound: silence, brown noise, rain or ocean. You can pause, resume, finish early or discard. Each finished session is logged automatically, and afterwards you're asked how you feel.
 - **Log.** You define every entry type yourself. Each type is one of:
   - an **activity / happening**, such as "Met friends" or "Coffee after 4pm"; or
   - a **mental state**, marked as a sign of *good* mental health ("Felt calm") or *bad* mental health ("Couldn't fall asleep", "Catastrophic thoughts").
@@ -38,9 +38,35 @@ Then open http://localhost:5173. To install it as an app, use your browser's ins
 npm test
 ```
 
-## Deploy
+## Real app and test build
 
-The app is fully static, so any static host works: GitHub Pages, Netlify, Cloudflare Pages, or your own server. All paths are relative, so it also runs from a subpath. Service workers only run over HTTPS or on localhost.
+The app is deployed twice, from two branches:
+
+| | URL | Data |
+| --- | --- | --- |
+| Real app | `https://pawsterior.buecking.me/` | `localStorage` key `pawsterior:v1`, starts empty |
+| Test build | `https://pawsterior.buecking.me/test/` | `localStorage` key `pawsterior-test:v1`, starts with about 8 weeks of random sample entries |
+
+The real app comes from `main` and the test build from `staging` (see below). The app knows which one it is from its URL path ([`src/env.js`](src/env.js)), so there are no build flags. The test build has a yellow TEST badge, its own storage key, its own service worker cache and its own installable manifest ([`manifest.test.webmanifest`](manifest.test.webmanifest)), so the two never touch each other's data. Test data persists between visits; Setup has a button to regenerate it ([`src/seed.js`](src/seed.js)).
+
+Locally, `npm start` serves the real app at http://localhost:5173 and the test build at http://localhost:5173/test/.
+
+## Staging and release
+
+GitHub Pages hosts one site, so [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) rebuilds both halves on every push to `main` or `staging`: the real app from `main`, the test build from `staging` ([`tools/build.mjs`](tools/build.mjs)). It runs `npm test` first and deploys nothing if a test fails.
+
+```
+work on staging  ->  push staging  ->  /test/ updates, the real app is untouched
+happy?           ->  merge staging into main  ->  the real app updates
+```
+
+```bash
+git switch staging        # make changes, commit
+git push                  # try them at https://pawsterior.buecking.me/test/
+git switch main && git merge staging && git push   # release
+```
+
+One-time GitHub setup: Settings > Pages > Source: "GitHub Actions"; and Settings > Environments > github-pages > Deployment branches: allow `main` and `staging`.
 
 After changing any app file, bump `CACHE` in [`sw.js`](sw.js) so installed copies pick up the new version.
 
@@ -50,10 +76,13 @@ After changing any app file, bump `CACHE` in [`sw.js`](sw.js) so installed copie
 spec/pawsterior.allium   behavioural spec (source of truth)
 src/model.js             entities and rules (pure, tested)
 src/insights.js          activity / mental-state associations (pure, tested)
-src/sounds.js            Web Audio bells and ambient noise (no audio files)
+src/sounds.js            Web Audio bells, wood snap and ambient noise (no audio files)
+src/env.js               real app vs test build, picked by URL path
+src/seed.js              random sample data for the test build
 src/app.js               UI, routing, persistence (localStorage), wake lock
 index.html, styles.css   shell and styles (light and dark)
 sw.js, manifest.webmanifest, icons/   PWA: offline and installable
 tools/serve.mjs          zero-dependency dev server
+tools/build.mjs          builds dist/ (real app) and dist/test/ (test build)
 tools/make-icons.mjs     regenerates the PNG icons from the paw geometry
 ```

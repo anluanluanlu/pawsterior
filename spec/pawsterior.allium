@@ -18,6 +18,8 @@ config {
     min_meditation_duration: Duration = 1.minute
     max_meditation_duration: Duration = 4.hours
     min_interval_bell: Duration = 1.minute
+    default_warmup: Duration = 15.seconds
+    max_warmup: Duration = 5.minutes
     max_type_name_length: Integer = 60
     max_note_length: Integer = 500
     min_intensity: Integer = 1
@@ -101,6 +103,7 @@ entity MeditationSession {
     planned_duration: Duration
     ambient: AmbientSound
     interval_bell: Duration?
+    warmup: Duration
     status: running | paused | completed | discarded
     started_at: Timestamp
     paused_at: Timestamp when status = paused
@@ -108,8 +111,10 @@ entity MeditationSession {
 
     logged_entry: Entry with session = this
 
-    -- Time actually spent meditating, excluding pauses.
-    elapsed: (if status = paused: paused_at else: now) - started_at - paused_total
+    -- Time since starting, excluding pauses; includes the warm-up.
+    raw_elapsed: (if status = paused: paused_at else: now) - started_at - paused_total
+    -- Time actually spent meditating: the warm-up does not count.
+    elapsed: max(raw_elapsed - warmup, 0.seconds)
     remaining: planned_duration - elapsed
     is_due: status = running and elapsed >= planned_duration
 
@@ -278,7 +283,7 @@ rule DeleteEntry {
 ------------------------------------------------------------
 
 rule StartMeditation {
-    when: StartMeditation(planned_duration, ambient, interval_bell?)
+    when: StartMeditation(planned_duration, ambient, interval_bell?, warmup)
 
     requires: not exists MeditationSession{status: running}
     requires: not exists MeditationSession{status: paused}
@@ -286,19 +291,24 @@ rule StartMeditation {
     requires: planned_duration <= config.max_meditation_duration
     requires: interval_bell = null
         or (interval_bell >= config.min_interval_bell and interval_bell < planned_duration)
+    requires: warmup >= 0.seconds and warmup <= config.max_warmup
 
     ensures:
         MeditationSession.created(
             planned_duration: planned_duration,
             ambient: ambient,
             interval_bell: interval_bell,
+            warmup: warmup,
             status: running,
             started_at: now,
             paused_total: 0.seconds
         )
 
     @guidance
-        -- Ring a bell at the start. Play the ambient sound while running.
+        -- The warm-up comes before the timed meditation (default
+        -- config.default_warmup, adjustable, 0 for none). Play a short wood
+        -- snap when it ends; with no warm-up, ring the bowl at the start
+        -- instead. The warm-up is not logged. Play the ambient sound while running.
         -- Ring a soft bell every interval_bell of elapsed time, and a deep
         -- bell at the end. Schedule bells on the audio clock so they stay
         -- on time when the page is in the background, and keep the screen
@@ -423,7 +433,7 @@ surface Meditate {
             session.status
 
     provides:
-        StartMeditation(planned_duration, ambient, interval_bell)
+        StartMeditation(planned_duration, ambient, interval_bell, warmup)
         for session in MeditationSessions where status in {running, paused}:
             PauseMeditation(session)
             ResumeMeditation(session)

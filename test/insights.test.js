@@ -75,19 +75,18 @@ test('pairs are sorted by the size of the difference', () => {
   assert.ok(Math.abs(pairs[0].diff) >= Math.abs(pairs[1].diff));
 });
 
-test('meditationSummary counts the week and the streak', () => {
+test('meditationSummary covers the last 7 days: minutes and distinct days', () => {
   const s = stateWith([
     ['Meditation', 1, 7, { durationMs: 20 * 60_000 }],
     ['Meditation', 8, 7, { durationMs: 10 * 60_000 }],
     ['Meditation', 9, 7, { durationMs: 15 * 60_000 }],
     ['Meditation', 9, 20, { durationMs: 5 * 60_000 }],
   ]);
-  const today = meditationSummary(s, at(10, 9));
-  assert.equal(today.weekMinutes, 30);
-  assert.equal(today.weekSessions, 3);
-  assert.equal(today.totalSessions, 4);
-  assert.equal(today.streak, 2, 'streak holds until the end of today');
-  assert.equal(meditationSummary(s, at(11, 9)).streak, 0);
+  const sum = meditationSummary(s, at(10, 9));
+  assert.equal(sum.weekMinutes, 30, 'day 1 is outside the window');
+  assert.equal(sum.weekDays, 2, 'two sessions on day 9 count as one day');
+  assert.equal(meditationSummary(s, at(15, 9)).weekDays, 1, 'day 8 drops out on day 15, day 9 stays');
+  assert.equal(meditationSummary(s, at(16, 9)).weekDays, 0, 'and out on day 16');
 });
 
 test('recentGrid lays out the last n days per type', () => {

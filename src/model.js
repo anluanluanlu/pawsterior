@@ -13,6 +13,8 @@ export const CONFIG = Object.freeze({
   minMeditationMs: 1 * MIN,
   maxMeditationMs: 240 * MIN,
   minIntervalBellMs: 1 * MIN,
+  defaultWarmupMs: 15_000,
+  maxWarmupMs: 5 * MIN,
   maxTypeNameLength: 60,
   maxNoteLength: 500,
   minIntensity: 1,
@@ -56,7 +58,7 @@ export function createInitialState(now = Date.now()) {
     ],
     entries: [],
     session: null,
-    settings: { durationMs: CONFIG.defaultMeditationMs, ambient: 'silence', intervalMs: 0 },
+    settings: { durationMs: CONFIG.defaultMeditationMs, ambient: 'silence', intervalMs: 0, warmupMs: CONFIG.defaultWarmupMs },
   };
 }
 
@@ -172,27 +174,37 @@ export function deleteEntry(state, id) {
 
 // ---------------------------------------------------------------- meditation sessions
 
-export function sessionElapsed(session, now = Date.now()) {
+/** Time since the session started, excluding pauses. Includes the warm-up. */
+export function sessionRawElapsed(session, now = Date.now()) {
   if (!session) return 0;
   const until = session.status === 'paused' ? session.pausedAt : now;
   return Math.max(0, until - session.startedAt - session.pausedTotalMs);
 }
 
+/** Time actually meditated: the warm-up does not count. */
+export const sessionElapsed = (session, now = Date.now()) =>
+  Math.max(0, sessionRawElapsed(session, now) - (session?.warmupMs ?? 0));
+
+/** Warm-up time still to go (0 once meditation has begun). */
+export const sessionWarmupRemaining = (session, now = Date.now()) =>
+  Math.max(0, (session?.warmupMs ?? 0) - sessionRawElapsed(session, now));
+
 export const sessionRemaining = (session, now = Date.now()) =>
   Math.max(0, session.plannedMs - sessionElapsed(session, now));
 
-export function startSession(state, { plannedMs, ambient = 'silence', intervalMs = 0 }, now = Date.now()) {
+export function startSession(state, { plannedMs, ambient = 'silence', intervalMs = 0, warmupMs = 0 }, now = Date.now()) {
   if (state.session) fail('A session is already in progress.');
   if (!Number.isFinite(plannedMs) || plannedMs < CONFIG.minMeditationMs) fail('Meditate for at least a minute.');
   if (plannedMs > CONFIG.maxMeditationMs) fail('Sessions can be at most 4 hours.');
   if (!AMBIENTS.includes(ambient)) fail('Unknown ambient sound.');
   const iv = intervalMs || 0;
   if (iv && (iv < CONFIG.minIntervalBellMs || iv >= plannedMs)) fail('Interval bells must be at least a minute and shorter than the session.');
+  if (!Number.isFinite(warmupMs) || warmupMs < 0 || warmupMs > CONFIG.maxWarmupMs) fail('Warm-up can be 0 to 300 seconds.');
   const session = {
-    id: newId(), plannedMs, ambient, intervalMs: iv, status: 'running',
+    id: newId(), plannedMs, ambient, intervalMs: iv, warmupMs: Math.round(warmupMs), status: 'running',
     startedAt: now, pausedAt: null, pausedTotalMs: 0,
   };
-  return { ...state, session, settings: { ...state.settings, durationMs: plannedMs, ambient, intervalMs: iv } };
+  return { ...state, session, settings: { ...state.settings, durationMs: plannedMs, ambient, intervalMs: iv, warmupMs: Math.round(warmupMs) } };
 }
 
 export function pauseSession(state, now = Date.now()) {

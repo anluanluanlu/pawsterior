@@ -1,0 +1,54 @@
+name: Test and deploy
+
+# GitHub Pages hosts one site, so every deploy rebuilds both halves:
+#   https://pawsterior.buecking.me/       <- the `main` branch    (real app)
+#   https://pawsterior.buecking.me/test/  <- the `staging` branch (test build)
+# Push to `staging` to update only /test/. Merge `staging` into `main` to release.
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm test
+
+  deploy:
+    needs: test
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with: { ref: main, path: _main }
+      - uses: actions/checkout@v4
+        with: { ref: staging, path: _staging }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: node tools/build.mjs _main _staging
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deploy
+        uses: actions/deploy-pages@v4

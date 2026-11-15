@@ -67,19 +67,15 @@ export function computeInsights(state, { now = Date.now(), lagDays = 1, minDays 
   return { days: days.length, pairs };
 }
 
-/** Meditation summary: minutes in the last 7 days, sessions, and current day streak. */
+/** Meditation summary for the last 7 days (today and the 6 days before): minutes and distinct days. */
 export function meditationSummary(state, now = Date.now()) {
   const med = state.types.find((t) => t.isMeditation);
   const entries = med ? state.entries.filter((e) => e.typeId === med.id) : [];
   const today = dayIndex(now);
   const week = entries.filter((e) => today - dayIndex(e.occurredAt) < 7);
   const weekMinutes = Math.round(week.reduce((sum, e) => sum + (e.durationMs ?? 0), 0) / 60_000);
-  const days = new Set(entries.map((e) => dayIndex(e.occurredAt)));
-  // A streak still counts if today has no session yet but yesterday did.
-  let d = days.has(today) ? today : today - 1;
-  let streak = 0;
-  while (days.has(d)) { streak++; d--; }
-  return { weekMinutes, weekSessions: week.length, totalSessions: entries.length, streak };
+  const weekDays = new Set(week.map((e) => dayIndex(e.occurredAt))).size;
+  return { weekMinutes, weekDays };
 }
 
 /** Grid of the last `n` days: for each type with entries, which days it was logged. */

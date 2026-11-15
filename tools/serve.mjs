@@ -14,7 +14,12 @@ const TYPES = {
 
 createServer(async (req, res) => {
   let path = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  // /test/ serves the same files, like the deployed test build (the app switches to test mode by its URL).
+  if (path === '/test') { res.writeHead(301, { Location: '/test/' }).end(); return; }
+  const isTest = /^\/test(\/|$)/.test(path);
+  if (isTest) path = path.slice(5) || '/';
   if (path.endsWith('/')) path += 'index.html';
+  if (isTest && path === '/manifest.webmanifest') path = '/manifest.test.webmanifest';
   const file = normalize(join(root, path));
   const rel = file.slice(root.length);
   if (!file.startsWith(root + sep) || rel.split(/[\\/]/).some((p) => p.startsWith('.') || p === 'node_modules')) {

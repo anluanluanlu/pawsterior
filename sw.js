@@ -1,8 +1,11 @@
 // Network first, falling back to the cache: always fresh when online, works offline.
-const CACHE = 'pawsterior-v1';
+// The test build is the same code under /test/, so it has its own cache name,
+// and each build only ever cleans up its own old caches.
+const PREFIX = self.registration.scope.includes('/test/') ? 'pawsterior-test-' : 'pawsterior-v';
+const CACHE = `${PREFIX}2`;
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'src/app.js', 'src/model.js', 'src/insights.js', 'src/sounds.js',
+  'src/app.js', 'src/model.js', 'src/insights.js', 'src/sounds.js', 'src/env.js', 'src/seed.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png',
 ];
 
@@ -13,7 +16,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
-      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then((keys) => Promise.all(keys.filter((k) => k.startsWith(PREFIX) && k !== CACHE).map((k) => caches.delete(k))))
       .then(() => self.clients.claim()),
   );
 });

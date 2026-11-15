@@ -104,7 +104,7 @@ test('meditation session runs to completion and logs the planned duration', () =
   let s = M.createInitialState(T0);
   s = M.startSession(s, { plannedMs: 10 * MIN, ambient: 'rain', intervalMs: 2 * MIN }, T0);
   assert.equal(s.session.status, 'running');
-  assert.deepEqual(s.settings, { durationMs: 10 * MIN, ambient: 'rain', intervalMs: 2 * MIN }, 'choices are remembered');
+  assert.deepEqual(s.settings, { durationMs: 10 * MIN, ambient: 'rain', intervalMs: 2 * MIN, warmupMs: 0 }, 'choices are remembered');
   assert.throws(() => M.startSession(s, { plannedMs: 10 * MIN }, T0), /already/);
 
   let r = M.tickSession(s, T0 + 9 * MIN);
@@ -147,6 +147,27 @@ test('finishing early logs actual time; under a minute it must be discarded', ()
   const discarded = M.discardSession(s);
   assert.equal(discarded.session, null);
   assert.equal(discarded.entries.length, 0, 'discarding leaves no entry');
+});
+
+test('warm-up delays the meditation clock and is not logged', () => {
+  let s = M.createInitialState(T0);
+  assert.equal(s.settings.warmupMs, 15_000, 'default warm-up is 15 s');
+  s = M.startSession(s, { plannedMs: 5 * MIN, warmupMs: 15_000 }, T0);
+  assert.equal(M.sessionWarmupRemaining(s.session, T0 + 5_000), 10_000);
+  assert.equal(M.sessionElapsed(s.session, T0 + 5_000), 0);
+  assert.equal(M.sessionRemaining(s.session, T0 + 5_000), 5 * MIN);
+  assert.equal(M.sessionWarmupRemaining(s.session, T0 + 20_000), 0);
+  assert.equal(M.sessionElapsed(s.session, T0 + 75_000), MIN);
+  // pausing during the warm-up freezes it
+  s = M.pauseSession(s, T0 + 5_000);
+  s = M.resumeSession(s, T0 + 65_000);
+  assert.equal(M.sessionWarmupRemaining(s.session, T0 + 65_000), 10_000);
+  assert.equal(M.tickSession(s, T0 + 15_000 + 60_000 + 5 * MIN - 1).completed, false);
+  const done = M.tickSession(s, T0 + 15_000 + 60_000 + 5 * MIN);
+  assert.equal(done.completed, true);
+  assert.equal(done.state.entries[0].durationMs, 5 * MIN, 'warm-up is not part of the logged duration');
+  assert.throws(() => M.startSession(M.createInitialState(T0), { plannedMs: 5 * MIN, warmupMs: -1 }, T0), M.ValidationError);
+  assert.throws(() => M.startSession(M.createInitialState(T0), { plannedMs: 5 * MIN, warmupMs: 301_000 }, T0), M.ValidationError);
 });
 
 test('startSession validates duration and interval bell', () => {

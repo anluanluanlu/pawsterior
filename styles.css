@@ -162,7 +162,7 @@ label.field > span, .field-label { display: block; font-size: 0.85rem; color: va
 
 /* ---------- meditate */
 
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin: 14px 0; }
+.stats { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin: 14px 0; }
 .stat { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px; text-align: center; }
 .stat b { display: block; font-size: 1.5rem; font-weight: 650; }
 .stat span { font-size: 0.78rem; color: var(--muted); }
@@ -275,3 +275,7 @@ dialog#sheet::backdrop { background: rgb(0 0 0 / 0.5); }
 
 .feel-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; }
 .feel-grid button[aria-pressed="true"] { opacity: 0.6; }
+
+.test-badge { background: #e6c84f; color: #151824; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; padding: 2px 7px; border-radius: 999px; }
+body.is-test .top { border-bottom: 2px solid #e6c84f; }
+.session.warmup .progress { stroke: #e6c84f; }
