@@ -51,6 +51,50 @@ The real app comes from `main` and the test build from `staging` (see below). Th
 
 Locally, `npm start` serves the real app at http://localhost:5173 and the test build at http://localhost:5173/test/.
 
+## Cloud sync (Cloudflare Worker + KV)
+
+Optional. Without it the app keeps everything in `localStorage`, as before. With it, you sign in (Setup, "Account & sync") and your data is kept in Cloudflare Workers KV and synced between devices. The device copy stays the source of truth, so the app still works offline and syncs when it can.
+
+```
+PWA (GitHub Pages)  ->  Worker in worker/  ->  KV namespace PAWS
+```
+
+- **Accounts:** email and password. Passwords are PBKDF2-SHA256 hashed with a per-user salt; sessions are random tokens (90 days) of which only the SHA-256 is stored; 10 wrong passwords lock an email for 15 minutes.
+- **Sync:** the whole data document is pushed after a change (2 s debounce) and pulled on start, on focus and when back online. Each push says which cloud revision it is based on. If the cloud moved on while this device also changed, the app asks which copy to keep. A running timer is never synced.
+- **Real and test:** the test build signs in with the same account but syncs to its own cloud copy (`profile=test`).
+
+### Set it up
+
+1. Create a free Cloudflare account, then from `worker/`:
+   ```bash
+   npm i -g wrangler
+   wrangler login
+   wrangler kv namespace create PAWS
+   ```
+   Paste the printed `id` into [`worker/wrangler.toml`](worker/wrangler.toml).
+2. Check `ALLOWED_ORIGINS` in the same file (your site's origin, no trailing slash), then deploy:
+   ```bash
+   wrangler deploy
+   ```
+   Wrangler prints the Worker URL (`https://pawsterior-api.<you>.workers.dev`).
+3. Point the app at it: set `API_URL` in [`src/env.js`](src/env.js). If your domain is on Cloudflare you can instead uncomment `routes` in `wrangler.toml` to serve it at `pawsterior-api.buecking.me`, and then set `API_URL` to that address.
+4. Open the app, Setup, "Sign in or create account", and create your account.
+5. Close registration so nobody else can sign up: set `ALLOW_SIGNUP = "false"` in `wrangler.toml` and run `wrangler deploy` again.
+
+Also worth doing in the Cloudflare dashboard: a rate limiting rule on `/auth/*` (Security, WAF).
+
+### Develop locally
+
+```bash
+cd worker
+cp .dev.vars.example .dev.vars   # allows requests from http://localhost
+wrangler dev                      # API on http://localhost:8787, with local KV
+```
+
+Then `npm start` in the repo root; on localhost the app talks to port 8787. `npm test` covers the Worker (against in-memory KV) and the sync logic ([`test/worker.test.js`](test/worker.test.js), [`test/sync.test.js`](test/sync.test.js)).
+
+KV has no atomic compare-and-swap, so two writes landing in the same instant could both pass the revision check. That is fine for one person on a few devices; use a Durable Object if you ever need strict ordering.
+
 ## Staging and release
 
 GitHub Pages hosts one site, so [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) rebuilds both halves on every push to `main` or `staging`: the real app from `main`, the test build from `staging` ([`tools/build.mjs`](tools/build.mjs)). It runs `npm test` first and deploys nothing if a test fails.
@@ -80,6 +124,8 @@ src/sounds.js            Web Audio bells, wood snap and ambient noise (no audio 
 src/env.js               real app vs test build, picked by URL path
 src/seed.js              random sample data for the test build
 src/app.js               UI, routing, persistence (localStorage), wake lock
+src/sync.js              sign-in and cloud sync engine (no DOM, tested)
+worker/                  Cloudflare Worker: auth and sync API on KV
 index.html, styles.css   shell and styles (light and dark)
 sw.js, manifest.webmanifest, icons/   PWA: offline and installable
 tools/serve.mjs          zero-dependency dev server

@@ -2,10 +2,10 @@
 // The test build is the same code under /test/, so it has its own cache name,
 // and each build only ever cleans up its own old caches.
 const PREFIX = self.registration.scope.includes('/test/') ? 'pawsterior-test-' : 'pawsterior-v';
-const CACHE = `${PREFIX}2`;
+const CACHE = `${PREFIX}3`;
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'src/app.js', 'src/model.js', 'src/insights.js', 'src/sounds.js', 'src/env.js', 'src/seed.js',
+  'src/app.js', 'src/model.js', 'src/insights.js', 'src/sounds.js', 'src/env.js', 'src/seed.js', 'src/sync.js',
   'icons/icon.svg', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png',
 ];
 

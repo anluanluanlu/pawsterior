@@ -4,7 +4,8 @@
 import * as M from './model.js';
 import { computeInsights, meditationSummary, recentGrid, dayIndex, dayStart } from './insights.js';
 import { SoundEngine } from './sounds.js';
-import { IS_TEST, STORAGE_KEY, APP_TITLE } from './env.js';
+import { IS_TEST, STORAGE_KEY, APP_TITLE, API_URL, SYNC_PROFILE, AUTH_KEY, SYNC_META_KEY } from './env.js';
+import { createSync } from './sync.js';
 import { demoState } from './seed.js';
 
 const ROUTES = ['meditate', 'log', 'history', 'insights', 'settings'];
@@ -19,8 +20,9 @@ const $view = document.getElementById('view');
 const $sheet = document.getElementById('sheet');
 const $toast = document.getElementById('toast');
 
+let sync = null; // created at boot, once everything it needs exists
 let state = load();
-if (IS_TEST) save(); // persist the sample data right away
+if (IS_TEST) persist(); // persist the sample data right away
 let historyFilter = 'all';
 let insightLag = 1;
 let wakeLock = null;
@@ -43,12 +45,18 @@ function load() {
   return IS_TEST ? demoState() : M.createInitialState();
 }
 
-function save() {
+function persist() {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
     toast('Could not save. Is storage full or blocked?', { error: true });
   }
+}
+
+/** Save on this device, then let cloud sync know. */
+function save() {
+  persist();
+  sync?.noteSaved();
 }
 
 /** Apply a model operation. Returns true on success; shows the reason on failure. */
@@ -275,9 +283,14 @@ const VIEWS = {
       <h3>Mental states</h3>
       <div class="card">${sorted.filter((t) => t.kind === 'mental_state').map(row).join('') || '<p class="muted small">None yet.</p>'}</div>
 
+      <h3>Account &amp; sync</h3>
+      ${accountCard()}
+
       <h3>Your data</h3>
       <div class="card">
-        <p class="small muted">Everything stays on this device, in this browser. Export a backup now and then, and use it to move to another device.</p>
+        <p class="small muted">${sync.status().signedIn
+          ? 'Your data lives on this device and is synced to your account. Backups are still handy.'
+          : 'Everything stays on this device, in this browser. Export a backup now and then, or sign in above to sync across devices.'}</p>
         <div class="row wrap">
           <button data-action="export">Export backup</button>
           <button data-action="import">Import backup…</button>
@@ -717,7 +730,7 @@ const ACTIONS = {
       }
       const ok = await confirmSheet({
         title: 'Replace your data?',
-        body: `This replaces everything on this device with ${next.types.length} types and ${next.entries.length} entries from the backup.`,
+        body: `This replaces everything on this device${sync.status().signedIn ? ' and in your account' : ''} with ${next.types.length} types and ${next.entries.length} entries from the backup.`,
         ok: 'Replace', danger: true,
       });
       if (ok) { sound.stopAll(); state = next; save(); render(); toast('Backup imported.'); }
@@ -725,7 +738,7 @@ const ACTIONS = {
     input.click();
   },
   async erase() {
-    if (!await confirmSheet({ title: 'Erase everything?', body: 'All types and entries on this device will be deleted. This cannot be undone. Export a backup first if you might want them.', ok: 'Erase', danger: true })) return;
+    if (!await confirmSheet({ title: 'Erase everything?', body: `All types and entries on this device${sync.status().signedIn ? ' and in your account (so on your other devices too)' : ''} will be deleted. This cannot be undone. Export a backup first if you might want them.`, ok: 'Erase', danger: true })) return;
     sound.stopAll();
     releaseWakeLock();
     state = M.createInitialState();
@@ -741,6 +754,17 @@ const ACTIONS = {
     save();
     render();
     toast('Sample data regenerated.');
+  },
+  'sign-in': () => authSheet(),
+  'sync-now': () => sync.syncNow(),
+  async 'sign-out'() {
+    if (!await confirmSheet({ title: 'Sign out?', body: 'The data on this device stays here. It just stops syncing until you sign in again.', ok: 'Sign out' })) return;
+    await sync.logout();
+    toast('Signed out.');
+  },
+  async 'delete-account'() {
+    if (!await confirmSheet({ title: 'Delete your account?', body: 'This deletes your account and its cloud copy (real and test). The data on this device is kept.', ok: 'Delete account', danger: true })) return;
+    try { await sync.deleteAccount(); toast('Account deleted.'); } catch (e) { toast(e.message, { error: true }); }
   },
   async install() {
     if (!installPrompt) return;
@@ -797,6 +821,127 @@ if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
 }
 navigator.storage?.persist?.().catch(() => {});
 
+// ================================================================ account & sync
+
+function ago(ts) {
+  const sec = Math.round((Date.now() - ts) / 1000);
+  if (sec < 45) return 'just now';
+  if (sec < 3600) return `${Math.round(sec / 60)} min ago`;
+  if (sec < 86400) return `${Math.round(sec / 3600)} h ago`;
+  return new Date(ts).toLocaleDateString();
+}
+
+function accountCard() {
+  const st = sync.status();
+  if (!st.signedIn) {
+    return `<div class="card">
+      <p class="small muted">Sign in to keep your data safe in the cloud and use it on more than one device. It still works offline.</p>
+      ${st.error ? `<p class="small" style="color:var(--bad)">${esc(st.error)}</p>` : ''}
+      <button class="primary" data-action="sign-in">Sign in or create account</button></div>`;
+  }
+  const line = {
+    syncing: 'Syncing…',
+    offline: 'Offline. Changes will sync when you are back online.',
+    error: `Sync problem: ${st.error ?? 'unknown error'}`,
+    conflict: 'The cloud copy and this device both changed.',
+    idle: st.dirty ? 'Waiting to sync…' : st.lastSyncedAt ? `Synced ${ago(st.lastSyncedAt)}` : 'Not synced yet',
+  }[st.phase];
+  const bad = st.phase === 'error' || st.phase === 'conflict';
+  return `<div class="card">
+    <p>Signed in as <b>${esc(st.email)}</b></p>
+    <p class="small ${bad ? '' : 'muted'}" ${bad ? 'style="color:var(--bad)"' : ''}>${esc(line)}</p>
+    <div class="row wrap">
+      <button data-action="sync-now">${st.phase === 'conflict' ? 'Resolve…' : 'Sync now'}</button>
+      <button data-action="sign-out">Sign out</button>
+      <span class="spacer"></span>
+      <button class="danger" data-action="delete-account">Delete account</button>
+    </div></div>`;
+}
+
+function authSheet() {
+  openSheet(`<form>
+      <h2 id="sheet-title">Sign in</h2>
+      <label class="field"><span>Email</span><input name="email" type="email" required autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false"></label>
+      <label class="field"><span>Password (at least 10 characters to create an account)</span><input name="password" type="password" required maxlength="200" autocomplete="current-password"></label>
+      <p class="small" id="auth-error" role="alert" style="color:var(--bad)" hidden></p>
+      <div class="sheet-actions">
+        <button type="button" data-act="cancel">Cancel</button>
+        <span class="spacer"></span>
+        <button type="button" data-act="register">Create account</button>
+        <button type="submit" class="primary">Sign in</button>
+      </div></form>`, (el) => {
+    const form = el.querySelector('form');
+    const $err = el.querySelector('#auth-error');
+    const buttons = form.querySelectorAll('button');
+    const attempt = async (kind) => {
+      $err.hidden = true;
+      if (!form.reportValidity()) return;
+      buttons.forEach((b) => { b.disabled = true; });
+      try {
+        await sync[kind](form.email.value, form.password.value);
+        closeSheet();
+        toast(kind === 'register' ? 'Account created. Syncing…' : 'Signed in. Syncing…');
+      } catch (e) {
+        $err.textContent = e.message;
+        $err.hidden = false;
+        buttons.forEach((b) => { b.disabled = false; });
+      }
+    };
+    el.querySelector('[data-act=cancel]').addEventListener('click', closeSheet);
+    el.querySelector('[data-act=register]').addEventListener('click', () => attempt('register'));
+    form.addEventListener('submit', (ev) => { ev.preventDefault(); attempt('login'); });
+    form.email.focus();
+  });
+}
+
+/** Both the cloud and this device changed. Returns 'cloud', 'device' or null (decide later). */
+function onConflict({ local, remote }) {
+  // Never interrupt a meditation or another open sheet; the Setup page offers "Resolve…".
+  if (state.session || $sheet.open) return Promise.resolve(null);
+  const count = (s) => `${s.entries.length} entries, ${s.types.length} types`;
+  return new Promise((resolve) => {
+    openSheet(`<h2 id="sheet-title">Which copy do you want?</h2>
+      <p class="muted">This device and your account have different data. Pick one; the other is replaced. Export a backup first if you are unsure.</p>
+      <div class="card small"><b>Cloud copy</b><br>${esc(count(remote))}</div>
+      <div class="card small"><b>This device</b><br>${esc(count(local))}</div>
+      <div class="sheet-actions">
+        <button data-r="later">Decide later</button><span class="spacer"></span>
+        <button data-r="device">Keep this device</button>
+        <button class="primary" data-r="cloud">Use cloud copy</button></div>`, (el) => {
+      let done = false;
+      const finish = (v) => { if (done) return; done = true; closeSheet(); resolve(v); };
+      el.querySelectorAll('[data-r]').forEach((b) => b.addEventListener('click', () => finish(b.dataset.r === 'later' ? null : b.dataset.r)));
+      el.addEventListener('close', () => finish(null), { once: true });
+    });
+  });
+}
+
+/** Replace local data with the cloud copy, keeping this device's running timer. */
+function applyRemote(remote) {
+  if (remote?.version !== M.SCHEMA_VERSION || !Array.isArray(remote.types) || !Array.isArray(remote.entries)) {
+    throw new Error('The cloud data is from a newer version of the app. Reload to update.');
+  }
+  state = { ...remote, session: state.session, settings: { ...M.createInitialState().settings, ...remote.settings } };
+  persist();
+  render();
+}
+
+sync = createSync({
+  apiUrl: API_URL,
+  profile: SYNC_PROFILE,
+  storage: localStorage,
+  authKey: AUTH_KEY,
+  metaKey: SYNC_META_KEY,
+  getState: () => state,
+  applyRemote,
+  // Nothing logged and no custom types: safe to replace without asking.
+  isPristine: (s) => s.entries.length === 0 && s.types.length <= M.createInitialState().types.length,
+  onConflict,
+  onChange: () => { if (currentRoute() === 'settings' && !$sheet.open) render(); },
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync.syncNow(); });
+window.addEventListener('online', () => sync.syncNow());
+
 // ================================================================ boot
 
 // A session left running across a reload completes immediately if its time is up.
@@ -809,3 +954,4 @@ if (IS_TEST) {
   document.querySelector('.brand span').insertAdjacentHTML('afterend', '<span class="test-badge">TEST</span>');
 }
 render();
+sync.syncNow();
