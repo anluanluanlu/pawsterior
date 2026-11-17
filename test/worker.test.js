@@ -51,6 +51,29 @@ test('registration can be closed', async () => {
   assert.equal(r.status, 403);
 });
 
+test('only allowlisted emails can register, whatever their case or spacing', async () => {
+  const env = newEnv({ ALLOWED_EMAILS: ' Me@Example.com , friend@example.com' });
+  const stranger = await call(env, 'POST', '/auth/register', { body: { email: 'stranger@example.com', password: PASSWORD } });
+  assert.equal(stranger.status, 403);
+  assert.equal(stranger.data.error, 'Registration is closed.');
+  assert.equal((await call(env, 'POST', '/auth/register', { body: { email: 'ME@example.com', password: PASSWORD } })).status, 200);
+  assert.equal((await call(env, 'POST', '/auth/register', { body: { email: 'friend@example.com', password: PASSWORD } })).status, 200);
+});
+
+test('an empty allowlist admits nobody, and the master switch still wins', async () => {
+  const none = newEnv({ ALLOWED_EMAILS: '' });
+  assert.equal((await call(none, 'POST', '/auth/register', { body: { email: 'me@example.com', password: PASSWORD } })).status, 403);
+  const closed = newEnv({ ALLOWED_EMAILS: 'me@example.com', ALLOW_SIGNUP: 'false' });
+  assert.equal((await call(closed, 'POST', '/auth/register', { body: { email: 'me@example.com', password: PASSWORD } })).status, 403);
+});
+
+test('the allowlist does not affect existing accounts signing in', async () => {
+  const env = newEnv();
+  await signedUp(env);
+  env.ALLOWED_EMAILS = 'someone-else@example.com';
+  assert.equal((await call(env, 'POST', '/auth/login', { body: { email: 'me@example.com', password: PASSWORD } })).status, 200);
+});
+
 test('repeated wrong passwords lock the account for a while, even for the right password', async () => {
   const env = newEnv();
   await signedUp(env);

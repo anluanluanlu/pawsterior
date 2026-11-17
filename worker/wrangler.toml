@@ -8,8 +8,11 @@ compatibility_date = "2026-11-01"
 [vars]
 # Comma-separated list of origins allowed to call the API from a browser.
 ALLOWED_ORIGINS = "https://pawsterior.buecking.me"
-# Set to "false" (and redeploy) once your account exists, to close registration.
+# Master switch: set to "false" to close registration for everyone.
 ALLOW_SIGNUP = "true"
+# Only these emails may create an account (comma-separated). To invite a friend, add their
+# address here and run `wrangler deploy`. Existing accounts are not affected by this list.
+ALLOWED_EMAILS = "anlu900@gmail.com"
 
 [[kv_namespaces]]
 binding = "PAWS"

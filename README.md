@@ -79,7 +79,7 @@ PWA (GitHub Pages)  ->  Worker in worker/  ->  KV namespace PAWS
    Wrangler prints the Worker URL (`https://pawsterior-api.<you>.workers.dev`).
 3. Point the app at it: set `API_URL` in [`src/env.js`](src/env.js). If your domain is on Cloudflare you can instead uncomment `routes` in `wrangler.toml` to serve it at `pawsterior-api.buecking.me`, and then set `API_URL` to that address.
 4. Open the app and choose "Create account".
-5. Close registration so nobody else can sign up: set `ALLOW_SIGNUP = "false"` in `wrangler.toml` and run `wrangler deploy` again.
+5. Registration is limited to the emails in `ALLOWED_EMAILS` in `wrangler.toml`. To invite a friend, add their address to that list and run `wrangler deploy`; they can then create their account in the app. Set `ALLOW_SIGNUP = "false"` to close registration for everyone. Existing accounts are never affected by either setting.
 
 Also worth doing in the Cloudflare dashboard: a rate limiting rule on `/auth/*` (Security, WAF).
 

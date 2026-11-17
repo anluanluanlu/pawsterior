@@ -1,6 +1,6 @@
 // Pawsterior sync API: accounts, sessions and one JSON document per user, all in Workers KV.
 //
-//   POST   /auth/register  {email, password}  -> {token, email}
+//   POST   /auth/register  {email, password}  -> {token, email}   (ALLOW_SIGNUP, ALLOWED_EMAILS)
 //   POST   /auth/login     {email, password}  -> {token, email}
 //   POST   /auth/logout                       -> {ok}           (Bearer token)
 //   GET    /data?profile=main|test            -> {rev, state}   (Bearer token)
@@ -116,6 +116,12 @@ async function register(req, env) {
   if (env.ALLOW_SIGNUP === 'false') throw new HttpError(403, 'Registration is closed.');
   const body = await readJson(req);
   const email = cleanEmail(body.email);
+  // With ALLOWED_EMAILS set (even to an empty list), only those addresses may register.
+  // The same message is used for everyone else, so the list is not revealed.
+  if (env.ALLOWED_EMAILS !== undefined) {
+    const allowed = String(env.ALLOWED_EMAILS).split(',').map((e) => e.trim().toLowerCase()).filter(Boolean);
+    if (!allowed.includes(email)) throw new HttpError(403, 'Registration is closed.');
+  }
   const password = cleanPassword(body.password);
   if (await env.PAWS.get(`user:${email}`)) throw new HttpError(409, 'That email is already registered. Sign in instead.');
   const salt = crypto.getRandomValues(new Uint8Array(16));
