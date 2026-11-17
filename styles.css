@@ -279,3 +279,17 @@ dialog#sheet::backdrop { background: rgb(0 0 0 / 0.5); }
 .test-badge { background: #e6c84f; color: #151824; font-size: 0.68rem; font-weight: 700; letter-spacing: 0.08em; padding: 2px 7px; border-radius: 999px; }
 body.is-test .top { border-bottom: 2px solid #e6c84f; }
 .session.warmup .progress { stroke: #e6c84f; }
+
+/* ---------- account */
+.top-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.whoami { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 0.8rem; text-decoration: none; }
+.whoami[hidden] { display: none; }
+.whoami .who { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 46vw; }
+.sync-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--good); }
+.whoami[data-phase=syncing] .sync-dot, .whoami[data-phase=pending] .sync-dot { background: #e6c84f; }
+.whoami[data-phase=offline] .sync-dot { background: var(--muted); }
+.whoami[data-phase=error] .sync-dot, .whoami[data-phase=conflict] .sync-dot { background: var(--bad); }
+body.signed-out .tabs { display: none; }
+.gate { max-width: 420px; margin: 6vh auto 0; }
+.gate h2 { margin-top: 0; }
+.gate .row { margin-top: 6px; }

@@ -53,7 +53,7 @@ Locally, `npm start` serves the real app at http://localhost:5173 and the test b
 
 ## Cloud sync (Cloudflare Worker + KV)
 
-Optional. Without it the app keeps everything in `localStorage`, as before. With it, you sign in (Setup, "Account & sync") and your data is kept in Cloudflare Workers KV and synced between devices. The device copy stays the source of truth, so the app still works offline and syncs when it can.
+You have to sign in to use the app (the sign-in screen replaces the app until you do, and your email shows in the top corner with a sync light). Your data is kept in Cloudflare Workers KV and synced between devices. The device copy stays the source of truth, so once signed in the app works offline and syncs when it can. The first time you sign in on a device that already has data, that data is uploaded to your account. Signing out removes the data from the device (it stays in your account).
 
 ```
 PWA (GitHub Pages)  ->  Worker in worker/  ->  KV namespace PAWS
@@ -78,7 +78,7 @@ PWA (GitHub Pages)  ->  Worker in worker/  ->  KV namespace PAWS
    ```
    Wrangler prints the Worker URL (`https://pawsterior-api.<you>.workers.dev`).
 3. Point the app at it: set `API_URL` in [`src/env.js`](src/env.js). If your domain is on Cloudflare you can instead uncomment `routes` in `wrangler.toml` to serve it at `pawsterior-api.buecking.me`, and then set `API_URL` to that address.
-4. Open the app, Setup, "Sign in or create account", and create your account.
+4. Open the app and choose "Create account".
 5. Close registration so nobody else can sign up: set `ALLOW_SIGNUP = "false"` in `wrangler.toml` and run `wrangler deploy` again.
 
 Also worth doing in the Cloudflare dashboard: a rate limiting rule on `/auth/*` (Security, WAF).

@@ -140,6 +140,10 @@ const currentRoute = () => {
 };
 
 function render() {
+  const signedIn = sync.status().signedIn;
+  document.body.classList.toggle('signed-out', !signedIn);
+  updateHeader();
+  if (!signedIn) { showGate(); return; }
   const route = currentRoute();
   $view.innerHTML = VIEWS[route]();
   document.querySelectorAll('.tabs a').forEach((a) => {
@@ -755,16 +759,16 @@ const ACTIONS = {
     render();
     toast('Sample data regenerated.');
   },
-  'sign-in': () => authSheet(),
   'sync-now': () => sync.syncNow(),
   async 'sign-out'() {
-    if (!await confirmSheet({ title: 'Sign out?', body: 'The data on this device stays here. It just stops syncing until you sign in again.', ok: 'Sign out' })) return;
-    await sync.logout();
-    toast('Signed out.');
+    if (!await confirmSheet({ title: 'Sign out?', body: 'Your data stays in your account. It is removed from this device, and you will need to sign in to use the app again.', ok: 'Sign out' })) return;
+    await sync.syncNow(); // get any last changes safely into the cloud first
+    if (sync.status().dirty && !await confirmSheet({ title: 'Some changes have not synced', body: 'They could not be uploaded just now, and would be lost. Sign out anyway?', ok: 'Sign out anyway', danger: true })) return;
+    await leaveDevice(() => sync.logout());
   },
   async 'delete-account'() {
-    if (!await confirmSheet({ title: 'Delete your account?', body: 'This deletes your account and its cloud copy (real and test). The data on this device is kept.', ok: 'Delete account', danger: true })) return;
-    try { await sync.deleteAccount(); toast('Account deleted.'); } catch (e) { toast(e.message, { error: true }); }
+    if (!await confirmSheet({ title: 'Delete your account?', body: 'This permanently deletes your account and its cloud copy (real and test), and removes the data from this device. Export a backup first if you want to keep it.', ok: 'Delete account', danger: true })) return;
+    try { await leaveDevice(() => sync.deleteAccount()); } catch (e) { toast(e.message, { error: true }); }
   },
   async install() {
     if (!installPrompt) return;
@@ -831,14 +835,18 @@ function ago(ts) {
   return new Date(ts).toLocaleDateString();
 }
 
+/** Run a sign-out style step, then clear this device's copy of the data. */
+async function leaveDevice(step) {
+  await step();
+  sound.stopAll();
+  releaseWakeLock();
+  state = M.createInitialState();
+  persist();
+  render();
+}
+
 function accountCard() {
   const st = sync.status();
-  if (!st.signedIn) {
-    return `<div class="card">
-      <p class="small muted">Sign in to keep your data safe in the cloud and use it on more than one device. It still works offline.</p>
-      ${st.error ? `<p class="small" style="color:var(--bad)">${esc(st.error)}</p>` : ''}
-      <button class="primary" data-action="sign-in">Sign in or create account</button></div>`;
-  }
   const line = {
     syncing: 'Syncing…',
     offline: 'Offline. Changes will sync when you are back online.',
@@ -858,40 +866,54 @@ function accountCard() {
     </div></div>`;
 }
 
-function authSheet() {
-  openSheet(`<form>
-      <h2 id="sheet-title">Sign in</h2>
+/** Shown instead of the app until you are signed in. */
+function showGate() {
+  const st = sync.status();
+  document.title = APP_TITLE;
+  $view.innerHTML = `<section class="card gate">
+    <h2>Sign in to Pawsterior</h2>
+    <p class="muted small">Your data is kept in your account, so it is safe and available on all your devices.</p>
+    ${st.error ? `<p class="small" style="color:var(--bad)">${esc(st.error)}</p>` : ''}
+    <form>
       <label class="field"><span>Email</span><input name="email" type="email" required autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false"></label>
       <label class="field"><span>Password (at least 10 characters to create an account)</span><input name="password" type="password" required maxlength="200" autocomplete="current-password"></label>
       <p class="small" id="auth-error" role="alert" style="color:var(--bad)" hidden></p>
-      <div class="sheet-actions">
-        <button type="button" data-act="cancel">Cancel</button>
-        <span class="spacer"></span>
-        <button type="button" data-act="register">Create account</button>
+      <div class="row wrap">
         <button type="submit" class="primary">Sign in</button>
-      </div></form>`, (el) => {
-    const form = el.querySelector('form');
-    const $err = el.querySelector('#auth-error');
-    const buttons = form.querySelectorAll('button');
-    const attempt = async (kind) => {
-      $err.hidden = true;
-      if (!form.reportValidity()) return;
-      buttons.forEach((b) => { b.disabled = true; });
-      try {
-        await sync[kind](form.email.value, form.password.value);
-        closeSheet();
-        toast(kind === 'register' ? 'Account created. Syncing…' : 'Signed in. Syncing…');
-      } catch (e) {
-        $err.textContent = e.message;
-        $err.hidden = false;
-        buttons.forEach((b) => { b.disabled = false; });
-      }
-    };
-    el.querySelector('[data-act=cancel]').addEventListener('click', closeSheet);
-    el.querySelector('[data-act=register]').addEventListener('click', () => attempt('register'));
-    form.addEventListener('submit', (ev) => { ev.preventDefault(); attempt('login'); });
-    form.email.focus();
-  });
+        <button type="button" data-act="register">Create account</button>
+      </div>
+    </form></section>`;
+  const form = $view.querySelector('form');
+  const $err = $view.querySelector('#auth-error');
+  const buttons = form.querySelectorAll('button');
+  const attempt = async (kind) => {
+    $err.hidden = true;
+    if (!form.reportValidity()) return;
+    buttons.forEach((b) => { b.disabled = true; });
+    try {
+      await sync[kind](form.email.value, form.password.value);
+      toast(kind === 'register' ? 'Account created.' : 'Signed in.');
+    } catch (e) {
+      $err.textContent = e.message;
+      $err.hidden = false;
+      buttons.forEach((b) => { b.disabled = false; });
+    }
+  };
+  form.querySelector('[data-act=register]').addEventListener('click', () => attempt('register'));
+  form.addEventListener('submit', (ev) => { ev.preventDefault(); attempt('login'); });
+  form.email.focus({ preventScroll: true });
+}
+
+/** Your email and a sync light in the top corner. */
+function updateHeader() {
+  const st = sync.status();
+  const $who = document.getElementById('whoami');
+  $who.hidden = !st.signedIn;
+  if (!st.signedIn) return;
+  $who.querySelector('.who').textContent = st.email;
+  const phase = st.phase === 'idle' && st.dirty ? 'pending' : st.phase;
+  $who.dataset.phase = phase;
+  $who.title = `Signed in as ${st.email}. ${{ idle: 'Synced', pending: 'Waiting to sync', syncing: 'Syncing', offline: 'Offline', error: 'Sync problem', conflict: 'Needs your attention' }[phase]}.`;
 }
 
 /** Both the cloud and this device changed. Returns 'cloud', 'device' or null (decide later). */
@@ -926,6 +948,7 @@ function applyRemote(remote) {
   render();
 }
 
+let wasSignedIn = false;
 sync = createSync({
   apiUrl: API_URL,
   profile: SYNC_PROFILE,
@@ -937,8 +960,15 @@ sync = createSync({
   // Nothing logged and no custom types: safe to replace without asking.
   isPristine: (s) => s.entries.length === 0 && s.types.length <= M.createInitialState().types.length,
   onConflict,
-  onChange: () => { if (currentRoute() === 'settings' && !$sheet.open) render(); },
+  onChange: () => {
+    const signedIn = sync.status().signedIn;
+    updateHeader();
+    // Signing in or out swaps the whole screen; otherwise only refresh the Setup card.
+    if (signedIn !== wasSignedIn) { wasSignedIn = signedIn; render(); }
+    else if (signedIn && currentRoute() === 'settings' && !$sheet.open) render();
+  },
 });
+wasSignedIn = sync.status().signedIn;
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync.syncNow(); });
 window.addEventListener('online', () => sync.syncNow());
 
