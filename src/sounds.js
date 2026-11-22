@@ -2,10 +2,13 @@
 // Bells are scheduled on the audio clock so they ring on time even if the page
 // is in the background and timers are throttled.
 
+// A simple gong: low fundamental, a slightly detuned twin for slow beating, soft upper partials.
+const GONG = [[1, 1], [1.006, 0.7], [2.0, 0.3], [2.98, 0.15], [4.1, 0.06]];
+
 const BELLS = {
   start: { freq: 196, gain: 0.45, decay: 7 },
   interval: { freq: 392, gain: 0.18, decay: 4 },
-  end: { freq: 147, gain: 0.55, decay: 9 },
+  end: { freq: 98, gain: 0.6, decay: 16, attack: 0.25, partials: GONG },
 };
 
 // Inharmonic partials loosely modelled on a singing bowl.
@@ -42,15 +45,15 @@ export class SoundEngine {
   /** Ring a bell `delaySec` seconds from now. Returns a handle for cancellation. */
   bell(kind = 'start', delaySec = 0) {
     if (!this.ctx) return null;
-    const { freq, gain, decay } = BELLS[kind] ?? BELLS.start;
+    const { freq, gain, decay, attack = 0.015, partials = PARTIALS } = BELLS[kind] ?? BELLS.start;
     const ctx = this.ctx;
     const t0 = ctx.currentTime + Math.max(0, delaySec) + 0.02;
     const out = ctx.createGain();
     out.gain.setValueAtTime(0.0001, t0);
-    out.gain.exponentialRampToValueAtTime(gain, t0 + 0.015);
+    out.gain.exponentialRampToValueAtTime(gain, t0 + attack);
     out.gain.exponentialRampToValueAtTime(0.0001, t0 + decay);
     out.connect(this.master);
-    const oscs = PARTIALS.map(([mult, amp], i) => {
+    const oscs = partials.map(([mult, amp], i) => {
       const o = ctx.createOscillator();
       o.type = 'sine';
       o.frequency.value = freq * mult;
@@ -133,7 +136,6 @@ export class SoundEngine {
     const remaining = warmupMs + plannedMs - rawElapsedMs;
     if (remaining > 0) {
       this.bell('end', remaining / 1000);
-      this.bell('end', remaining / 1000 + 2.5);
     }
   }
 

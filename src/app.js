@@ -2,7 +2,7 @@
 // Domain rules live in model.js; this file never mutates state except through it.
 
 import * as M from './model.js';
-import { computeInsights, meditationSummary, recentGrid, dayIndex, dayStart } from './insights.js';
+import { computeInsights, recentGrid, dayIndex, dayStart } from './insights.js';
 import { SoundEngine } from './sounds.js';
 import { IS_TEST, STORAGE_KEY, APP_TITLE, API_URL, SYNC_PROFILE, AUTH_KEY, SYNC_META_KEY } from './env.js';
 import { createSync } from './sync.js';
@@ -215,7 +215,6 @@ const VIEWS = {
   },
 
   insights() {
-    const sum = meditationSummary(state);
     const grid = recentGrid(state, { n: 21 });
     const { days, pairs } = computeInsights(state, { lagDays: insightLag });
     const lagChip = (v, label) => `<button class="chip" aria-pressed="${insightLag === v}" data-action="lag" data-v="${v}">${label}</button>`;
@@ -240,11 +239,6 @@ const VIEWS = {
     }).join('');
     return `
       <div class="section-head"><h2>Insights</h2></div>
-      <div class="stats">
-        <div class="stat"><b>${sum.weekMinutes}</b><span>min in last 7 days</span></div>
-        <div class="stat"><b>${sum.weekDays}</b><span>days meditated in last 7 days</span></div>
-      </div>
-
       <h3>Last 3 weeks</h3>
       ${grid.rows.length ? `<div class="card grid-wrap"><table class="heat">
         <thead><tr><th></th>${dayHead}</tr></thead>
@@ -314,7 +308,6 @@ const VIEWS = {
       <div class="card small">
         <p>Pawsterior tracks meditation and the things that shape your mind, alongside how you're actually doing.</p>
         <p class="muted">Works offline. Add it to your home screen or install it from the browser menu to use it like an app.</p>
-        <button class="small" data-action="preview-bell">Test the bell</button>
       </div>`;
   },
 };
@@ -323,7 +316,6 @@ function setupView() {
   const s = state.settings;
   const mins = Math.round(s.durationMs / 60000);
   const warmupMs = s.warmupMs ?? 0;
-  const sum = meditationSummary(state);
   return `
     <section class="card">
       <h2>Meditate</h2>
@@ -336,15 +328,14 @@ function setupView() {
         <input type="number" inputmode="numeric" min="0" max="300" step="5" value="${Math.round(warmupMs / 1000)}" data-change="custom-warmup" aria-label="Warm-up in seconds"></label>
       <h3>Sound</h3>
       <div class="chips">${M.AMBIENTS.map((a) => `<button class="chip" aria-pressed="${a === s.ambient}" data-action="set-ambient" data-v="${a}">${AMBIENT_LABELS[a]}</button>`).join('')}</div>
-      <h3>Interval bell</h3>
-      <div class="chips">${INTERVALS.filter((m) => m === 0 || m * 60000 < s.durationMs).map((m) =>
-        `<button class="chip" aria-pressed="${m * 60000 === (s.intervalMs || 0)}" data-action="set-interval" data-v="${m}">${m ? `every ${m} min` : 'Off'}</button>`).join('')}</div>
+      <h3>Hear the sounds</h3>
+      <div class="chips">
+        <button class="chip" data-action="preview-sound" data-v="snap">Warm-up end</button>
+        <button class="chip" data-action="preview-sound" data-v="start">Start bell</button>
+        <button class="chip" data-action="preview-sound" data-v="end">End gong</button>
+      </div>
       <div style="margin-top:22px"><button class="primary big" data-action="start">Begin · ${mins} min</button></div>
-    </section>
-    <div class="stats">
-      <div class="stat"><b>${sum.weekMinutes}</b><span>min in last 7 days</span></div>
-      <div class="stat"><b>${sum.weekDays}</b><span>days meditated in last 7 days</span></div>
-    </div>`;
+    </section>`;
 }
 
 const RING_C = 2 * Math.PI * 94;
@@ -360,8 +351,8 @@ function sessionView() {
           <circle class="progress" id="ring-progress" cx="100" cy="100" r="94" stroke-dasharray="${RING_C}" stroke-dashoffset="${RING_C}"></circle>
         </svg>
         <div class="ring-text">
-          <div class="time" id="timer-remaining">--:--</div>
-          <div class="sub ${paused ? '' : 'breathe'}" id="timer-sub"></div>
+          <div class="time" id="timer-phase"></div>
+          <div class="sub" id="timer-sub"></div>
         </div>
       </div>
       ${sound.ready ? '' : `<p><button class="small" data-action="enable-sound">🔔 Turn sound on</button></p>`}
@@ -384,13 +375,10 @@ function updateTimer() {
   const remaining = warming ? warm : M.sessionRemaining(s);
   const total = warming ? s.warmupMs : s.plannedMs;
   document.title = `${fmtClock(remaining)} · ${APP_TITLE}`;
-  const $t = document.getElementById('timer-remaining');
+  const $t = document.getElementById('timer-phase');
   if (!$t) return;
-  $t.textContent = fmtClock(remaining);
-  const paused = s.status === 'paused';
-  const phase = warming ? 'Get settled' : 'Breathe';
-  const detail = warming ? `warm-up, then ${fmtDuration(s.plannedMs)}` : fmtDuration(s.plannedMs);
-  document.getElementById('timer-sub').textContent = `${paused ? 'Paused' : phase} · ${detail} · ${AMBIENT_LABELS[s.ambient]}`;
+  $t.textContent = warming ? 'Warm up' : 'Meditation';
+  document.getElementById('timer-sub').textContent = fmtDuration(total);
   const ring = document.getElementById('ring-progress');
   if (ring) ring.style.strokeDashoffset = String(RING_C * (remaining / total));
   document.querySelector('.session')?.classList.toggle('warmup', warming);
@@ -423,7 +411,6 @@ function onSessionEnded(durationMs) {
   releaseWakeLock();
   render();
   toast(`Logged ${fmtDuration(durationMs)} of meditation.`);
-  openFeelSheet();
 }
 
 function lastMeditationEntry() {
@@ -607,24 +594,6 @@ function typeSheet(type = null) {
   });
 }
 
-function openFeelSheet() {
-  const states = state.types.filter((t) => t.kind === 'mental_state' && !t.archived);
-  if (!states.length) return;
-  openSheet(`<h2 id="sheet-title">How do you feel?</h2>
-    <p class="muted small">Tap anything that fits right now. It gets logged with the current time.</p>
-    <div class="feel-grid">${states.map((t) => `<button class="type-btn" style="--c:${esc(t.color)}" data-feel="${t.id}"><span class="name">${esc(t.name)}</span></button>`).join('')}</div>
-    <div class="sheet-actions"><span class="spacer"></span><button class="primary" data-act="done">Done</button></div>`, (el) => {
-    el.querySelectorAll('[data-feel]').forEach((b) => b.addEventListener('click', () => {
-      if (b.getAttribute('aria-pressed') === 'true') return;
-      if (apply((s) => M.logEntry(s, { typeId: b.dataset.feel, occurredAt: Date.now() }))) {
-        b.setAttribute('aria-pressed', 'true');
-        b.querySelector('.name').textContent = `✓ ${b.querySelector('.name').textContent}`;
-      }
-    }));
-    el.querySelector('[data-act=done]').addEventListener('click', closeSheet);
-  });
-}
-
 // ================================================================ actions
 
 const ACTIONS = {
@@ -635,7 +604,7 @@ const ACTIONS = {
   async start() {
     const { durationMs, ambient, intervalMs, warmupMs } = state.settings;
     const unlocked = sound.unlock();
-    if (!apply((s) => M.startSession(s, { plannedMs: durationMs, ambient, intervalMs: intervalMs < durationMs ? intervalMs : 0, warmupMs: warmupMs ?? 0 }))) return;
+    if (!apply((s) => M.startSession(s, { plannedMs: durationMs, ambient, intervalMs: 0, warmupMs: warmupMs ?? 0 }))) return;
     await unlocked;
     // With a warm-up the wood snap marks the start of meditation; without one, the bowl does.
     if (!warmupMs) sound.bell('start');
@@ -681,9 +650,10 @@ const ACTIONS = {
     soundForSession();
     render();
   },
-  async 'preview-bell'() {
+  async 'preview-sound'(el) {
     await sound.unlock();
-    sound.bell('start');
+    sound.cancelBells();
+    if (el.dataset.v === 'snap') sound.snap(); else sound.bell(el.dataset.v);
   },
 
   'quick-log': (el) => {
@@ -817,7 +787,8 @@ document.addEventListener('change', (e) => {
 window.addEventListener('beforeinstallprompt', (e) => {
   e.preventDefault();
   installPrompt = e;
-  document.getElementById('install-btn').hidden = false;
+  // Only offer the install button on touch devices, not desktop browsers.
+  document.getElementById('install-btn').hidden = !matchMedia('(pointer: coarse)').matches;
 });
 
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
@@ -856,7 +827,6 @@ function accountCard() {
   }[st.phase];
   const bad = st.phase === 'error' || st.phase === 'conflict';
   return `<div class="card">
-    <p>Signed in as <b>${esc(st.email)}</b></p>
     <p class="small ${bad ? '' : 'muted'}" ${bad ? 'style="color:var(--bad)"' : ''}>${esc(line)}</p>
     <div class="row wrap">
       <button data-action="sync-now">${st.phase === 'conflict' ? 'Resolve…' : 'Sync now'}</button>
