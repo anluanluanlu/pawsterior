@@ -324,14 +324,13 @@ function setupView() {
       <label class="field" style="margin-top:12px"><span>Or minutes</span>
         <input type="number" inputmode="numeric" min="1" max="240" step="1" value="${mins}" data-change="custom-duration" aria-label="Custom duration in minutes"></label>
       <h3>Warm-up</h3>
-      <label class="field"><span>Seconds before the timer starts (a wood snap marks the end, 0 for none)</span>
+      <label class="field"><span>Seconds before the timer starts (a wood click marks the start of meditation, 0 for none)</span>
         <input type="number" inputmode="numeric" min="0" max="300" step="5" value="${Math.round(warmupMs / 1000)}" data-change="custom-warmup" aria-label="Warm-up in seconds"></label>
       <h3>Sound</h3>
       <div class="chips">${M.AMBIENTS.map((a) => `<button class="chip" aria-pressed="${a === s.ambient}" data-action="set-ambient" data-v="${a}">${AMBIENT_LABELS[a]}</button>`).join('')}</div>
       <h3>Hear the sounds</h3>
       <div class="chips">
-        <button class="chip" data-action="preview-sound" data-v="snap">Warm-up end</button>
-        <button class="chip" data-action="preview-sound" data-v="start">Start bell</button>
+        <button class="chip" data-action="preview-sound" data-v="snap">Start click</button>
         <button class="chip" data-action="preview-sound" data-v="end">End gong</button>
       </div>
       <div style="margin-top:22px"><button class="primary big" data-action="start">Begin · ${mins} min</button></div>
@@ -606,8 +605,8 @@ const ACTIONS = {
     const unlocked = sound.unlock();
     if (!apply((s) => M.startSession(s, { plannedMs: durationMs, ambient, intervalMs: 0, warmupMs: warmupMs ?? 0 }))) return;
     await unlocked;
-    // With a warm-up the wood snap marks the start of meditation; without one, the bowl does.
-    if (!warmupMs) sound.bell('start');
+    // A wood click marks the start of meditation (scheduled for the end of the warm-up, if any).
+    if (!warmupMs) sound.snap();
     soundForSession();
     requestWakeLock();
     render();

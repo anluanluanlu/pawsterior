@@ -269,6 +269,7 @@ dialog#sheet::backdrop { background: rgb(0 0 0 / 0.5); }
   background: var(--text); color: var(--bg); padding: 10px 10px 10px 16px;
   border-radius: 14px; box-shadow: var(--shadow); font-size: 0.92rem;
 }
+#toast[hidden] { display: none; }
 #toast.error { background: var(--danger); color: #fff; }
 #toast button { min-height: 34px; padding: 4px 12px; background: transparent; color: inherit; border-color: currentColor; font-size: 0.85rem; }
 @media (min-width: 760px) { #toast { bottom: 100px; } }
