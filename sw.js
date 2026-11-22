@@ -2,7 +2,7 @@
 // The test build is the same code under /test/, so it has its own cache name,
 // and each build only ever cleans up its own old caches.
 const PREFIX = self.registration.scope.includes('/test/') ? 'pawsterior-test-' : 'pawsterior-v';
-const CACHE = `${PREFIX}3`;
+const CACHE = `${PREFIX}4`;
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'src/app.js', 'src/model.js', 'src/insights.js', 'src/sounds.js', 'src/env.js', 'src/seed.js', 'src/sync.js',
@@ -25,7 +25,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: 'no-cache' })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
