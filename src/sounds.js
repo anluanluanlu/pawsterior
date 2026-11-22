@@ -2,6 +2,13 @@
 // Bells are scheduled on the audio clock so they ring on time even if the page
 // is in the background and timers are throttled.
 
+// Recorded start (bamboo clapper) and end (gong) sounds; the synthesised versions
+// below are only a fallback while these load or if they fail to.
+const SAMPLE_URLS = {
+  start: new URL('./audio/start.wav', import.meta.url).href,
+  end: new URL('./audio/end.wav', import.meta.url).href,
+};
+
 // A simple gong: low fundamental, a slightly detuned twin for slow beating, soft upper partials.
 const GONG = [[1, 1], [1.006, 0.7], [2.0, 0.3], [2.98, 0.15], [4.1, 0.06]];
 
@@ -20,6 +27,7 @@ export class SoundEngine {
     this.master = null;
     this.ambient = null;
     this.scheduled = new Set();
+    this.samples = null;
   }
 
   get ready() {
@@ -39,12 +47,48 @@ export class SoundEngine {
     if (this.ctx.state !== 'running') {
       try { await this.ctx.resume(); } catch { /* ignore */ }
     }
+    this.loadSamples();
     return this.ready;
+  }
+
+  /** Fetch and decode the start/end recordings once; until then the synthesised sounds play. */
+  loadSamples() {
+    if (this.samples || !this.ctx) return;
+    this.samples = {};
+    for (const [kind, url] of Object.entries(SAMPLE_URLS)) {
+      fetch(url)
+        .then((r) => r.arrayBuffer())
+        .then((data) => this.ctx.decodeAudioData(data))
+        .then((buf) => { this.samples[kind] = buf; })
+        .catch(() => { /* keep the synthesised fallback */ });
+    }
+  }
+
+  /** Play a decoded recording `delaySec` from now; null if it isn't loaded. */
+  sample(kind, delaySec = 0, gain = 1) {
+    const buf = this.samples?.[kind];
+    if (!this.ctx || !buf) return null;
+    const ctx = this.ctx;
+    const out = ctx.createGain();
+    out.gain.value = gain;
+    out.connect(this.master);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(out);
+    src.start(ctx.currentTime + Math.max(0, delaySec) + 0.02);
+    const handle = { oscs: [src], out };
+    this.scheduled.add(handle);
+    src.onended = () => { this.scheduled.delete(handle); out.disconnect(); };
+    return handle;
   }
 
   /** Ring a bell `delaySec` seconds from now. Returns a handle for cancellation. */
   bell(kind = 'start', delaySec = 0) {
     if (!this.ctx) return null;
+    if (kind === 'end') {
+      const h = this.sample('end', delaySec);
+      if (h) return h;
+    }
     const { freq, gain, decay, attack = 0.015, partials = PARTIALS } = BELLS[kind] ?? BELLS.start;
     const ctx = this.ctx;
     const t0 = ctx.currentTime + Math.max(0, delaySec) + 0.02;
@@ -75,6 +119,8 @@ export class SoundEngine {
   /** A short dry wood "tok", `delaySec` from now. Marks the end of the warm-up. */
   snap(delaySec = 0) {
     if (!this.ctx) return null;
+    const recorded = this.sample('start', delaySec);
+    if (recorded) return recorded;
     const ctx = this.ctx;
     const t0 = ctx.currentTime + Math.max(0, delaySec) + 0.02;
     const out = ctx.createGain();
