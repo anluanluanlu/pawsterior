@@ -551,6 +551,30 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   });
 }
 
+/** Pops up right after a bad state is logged: pick a severity, add details, save. */
+function severitySheet(type, entry) {
+  openSheet(`<h2 id="sheet-title"><span class="dot" style="background:${esc(type.color)}"></span>${esc(type.name)}</h2>
+      <div class="field"><span class="field-label">How severe was it?</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
+        ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="sev" value="${v}" ${v === '' ? 'checked' : ''}><span class="${v ? `sev-${v}` : ''}">${v || '–'}<small>${v ? SEVERITY_LABELS[v] : 'Unknown'}</small></span></label>`).join('')}
+      </div></div>
+      <label class="field"><span>Details (optional)</span><textarea name="note" maxlength="${M.CONFIG.maxNoteLength}"></textarea></label>
+      <div class="sheet-actions">
+        <button type="button" data-act="undo" class="ghost">Undo</button>
+        <span class="spacer"></span>
+        <button type="button" class="primary" data-act="save">Save</button>
+      </div>`, (el) => {
+    el.querySelector('[data-act=save]').addEventListener('click', () => {
+      const v = el.querySelector('input[name=sev]:checked')?.value;
+      const intensity = v ? Number(v) : null;
+      if (apply((s) => M.editEntry(s, entry.id, { intensity, note: el.querySelector('textarea[name=note]').value }))) {
+        closeSheet();
+        toast(`Logged ${type.name}${intensity ? `: ${SEVERITY_LABELS[intensity].toLowerCase()}` : ''}.`);
+      }
+    });
+    el.querySelector('[data-act=undo]').addEventListener('click', () => { if (apply((s) => M.deleteEntry(s, entry.id))) closeSheet(); });
+  });
+}
+
 function typeSheet(type = null) {
   const isNew = !type;
   const t = type ?? { name: '', kind: 'activity', polarity: 'bad', color: PALETTE[Math.floor(Math.random() * PALETTE.length)] };
@@ -670,6 +694,7 @@ const ACTIONS = {
     const type = M.getType(state, el.dataset.id);
     if (!apply((s) => M.logEntry(s, { typeId: el.dataset.id, occurredAt: Date.now() }))) return;
     const entry = M.sortedEntries(state).find((e) => e.typeId === type.id);
+    if (isBad(type)) { severitySheet(type, entry); return; }
     toast(`Logged ${type.name}.`, {
       actions: [
         { label: isBad(type) ? 'Severity' : 'Details', fn: () => entrySheet({ entry: state.entries.find((e) => e.id === entry.id) }) },
