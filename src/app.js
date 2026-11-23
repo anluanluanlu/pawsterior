@@ -108,7 +108,7 @@ function toLocalInput(ts) {
 }
 
 const polarityBadge = (t) => t.kind === 'mental_state'
-  ? `<span class="badge ${t.polarity}">${t.polarity === 'good' ? '▲ good' : '▼ bad'}</span>` : '';
+  ? `<span class="badge ${t.polarity}">${t.polarity === 'good' ? '▲ good' : '▼ negative'}</span>` : '';
 
 // Bad mental states are rated by severity; good ones keep the plain intensity scale.
 const SEVERITY_LABELS = ['', 'Barely', 'Mild', 'Moderate', 'Strong', 'Severe'];
@@ -185,7 +185,7 @@ const VIEWS = {
     }
     return `
       <div class="section-head"><h2>Log</h2><button class="small" data-action="new-type">+ New type</button></div>
-      <p class="muted small">Tap to log it now. You can add details or change the time afterwards.</p>
+      <p class="muted small">Tap to log it. The time defaults to now, and you can change it.</p>
       <h3>Activities &amp; happenings</h3>${btns(acts)}
       <h3>Mental state · good signs</h3>${btns(good)}
       <h3>Mental state · bad signs</h3>${btns(bad)}
@@ -558,27 +558,33 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   });
 }
 
-/** Pops up right after a bad state is logged: pick a severity, add details, save. */
-function severitySheet(type, entry) {
-  openSheet(`<h2 id="sheet-title"><span class="dot" style="background:${esc(type.color)}"></span>${esc(type.name)}</h2>
-      <div class="field"><span class="field-label">How severe was it?</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
+/** Opens when a type is tapped: the time defaults to now but can be changed; bad states also get a severity. */
+function logSheet(type) {
+  const bad = isBad(type);
+  openSheet(`<form>
+      <h2 id="sheet-title"><span class="dot" style="background:${esc(type.color)}"></span>${esc(type.name)}</h2>
+      <label class="field"><span>When</span><input type="datetime-local" name="when" required value="${toLocalInput(Date.now())}" max="${toLocalInput(Date.now() + 60000)}"></label>
+      ${bad ? `<div class="field"><span class="field-label">How severe was it? (optional)</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
         ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="sev" value="${v}" ${v === '' ? 'checked' : ''}><span class="${v ? `sev-${v}` : ''}">${v || '–'}<small>${v ? SEVERITY_LABELS[v] : 'Unknown'}</small></span></label>`).join('')}
-      </div></div>
+      </div></div>` : ''}
       <label class="field"><span>Details (optional)</span><textarea name="note" maxlength="${M.CONFIG.maxNoteLength}"></textarea></label>
       <div class="sheet-actions">
-        <button type="button" data-act="undo" class="ghost">Undo</button>
+        <button type="button" data-act="cancel">Cancel</button>
         <span class="spacer"></span>
-        <button type="button" class="primary" data-act="save">Save</button>
-      </div>`, (el) => {
-    el.querySelector('[data-act=save]').addEventListener('click', () => {
-      const v = el.querySelector('input[name=sev]:checked')?.value;
+        <button type="submit" class="primary">Log</button>
+      </div></form>`, (el) => {
+    const form = el.querySelector('form');
+    el.querySelector('[data-act=cancel]').addEventListener('click', closeSheet);
+    form.addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const v = form.querySelector('input[name=sev]:checked')?.value;
       const intensity = v ? Number(v) : null;
-      if (apply((s) => M.editEntry(s, entry.id, { intensity, note: el.querySelector('textarea[name=note]').value }))) {
+      const occurredAt = new Date(form.when.value).getTime();
+      if (apply((s) => M.logEntry(s, { typeId: type.id, occurredAt, intensity, note: form.note.value }))) {
         closeSheet();
         toast(`Logged ${type.name}${intensity ? `: ${SEVERITY_LABELS[intensity].toLowerCase()}` : ''}.`);
       }
     });
-    el.querySelector('[data-act=undo]').addEventListener('click', () => { if (apply((s) => M.deleteEntry(s, entry.id))) closeSheet(); });
   });
 }
 
@@ -699,15 +705,7 @@ const ACTIONS = {
 
   'quick-log': (el) => {
     const type = M.getType(state, el.dataset.id);
-    if (!apply((s) => M.logEntry(s, { typeId: el.dataset.id, occurredAt: Date.now() }))) return;
-    const entry = M.sortedEntries(state).find((e) => e.typeId === type.id);
-    if (isBad(type)) { severitySheet(type, entry); return; }
-    toast(`Logged ${type.name}.`, {
-      actions: [
-        { label: isBad(type) ? 'Severity' : 'Details', fn: () => entrySheet({ entry: state.entries.find((e) => e.id === entry.id) }) },
-        { label: 'Undo', fn: () => apply((s) => M.deleteEntry(s, entry.id)) },
-      ],
-    });
+    if (type) logSheet(type);
   },
   'log-past': () => entrySheet(),
   'edit-entry': (el) => {
