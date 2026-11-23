@@ -177,16 +177,23 @@ const VIEWS = {
       ? `<div class="type-grid">${list.map((t) => `<button class="type-btn" style="--c:${esc(t.color)}" data-action="quick-log" data-id="${t.id}">
           <span class="name">${esc(t.name)}</span></button>`).join('')}</div>`
       : '<p class="muted small">Nothing here yet.</p>';
-    const today = dayIndex(Date.now());
-    const todays = M.sortedEntries(state).filter((e) => dayIndex(e.occurredAt) === today);
+    const groups = new Map();
+    for (const e of M.sortedEntries(state)) {
+      const d = dayIndex(e.occurredAt);
+      if (!groups.has(d)) groups.set(d, []);
+      groups.get(d).push(e);
+    }
     return `
       <div class="section-head"><h2>Log</h2><button class="small" data-action="new-type">+ New type</button></div>
       <p class="muted small">Tap to log it now. You can add details or change the time afterwards.</p>
       <h3>Activities &amp; happenings</h3>${btns(acts)}
       <h3>Mental state · good signs</h3>${btns(good)}
       <h3>Mental state · bad signs</h3>${btns(bad)}
-      <h3>Today</h3>
-      ${todays.length ? `<ul class="entries card">${todays.map(entryRow).join('')}</ul>` : '<p class="muted small">Nothing logged today.</p>'}
+      <h3>Log</h3>
+      ${groups.size === 0 ? '<p class="muted small">Nothing logged yet.</p>' : ''}
+      ${[...groups].map(([d, es]) => `
+        <div class="day-label">${esc(dayLabel(d))}</div>
+        <ul class="entries">${es.map(entryRow).join('')}</ul>`).join('')}
       <button class="ghost small" data-action="log-past">Log something at another time…</button>`;
   },
 
