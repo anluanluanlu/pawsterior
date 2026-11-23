@@ -110,10 +110,17 @@ function toLocalInput(ts) {
 const polarityBadge = (t) => t.kind === 'mental_state'
   ? `<span class="badge ${t.polarity}">${t.polarity === 'good' ? '▲ good' : '▼ bad'}</span>` : '';
 
+// Bad mental states are rated by severity; good ones keep the plain intensity scale.
+const SEVERITY_LABELS = ['', 'Barely', 'Mild', 'Moderate', 'Strong', 'Severe'];
+const isBad = (t) => t?.kind === 'mental_state' && t.polarity === 'bad';
+
+const severityBadge = (e, type) => isBad(type) && e.intensity
+  ? `<span class="badge sev sev-${e.intensity}" title="Severity ${e.intensity}/5">${SEVERITY_LABELS[e.intensity]}</span>` : '';
+
 function entryMeta(e, type) {
   const bits = [];
   if (e.durationMs) bits.push(fmtDuration(e.durationMs));
-  if (e.intensity) bits.push(`intensity ${e.intensity}/5`);
+  if (e.intensity && !isBad(type)) bits.push(`intensity ${e.intensity}/5`);
   if (type?.isMeditation && e.sessionId) bits.push('timed session');
   return bits.join(' · ');
 }
@@ -124,7 +131,7 @@ function entryRow(e) {
   return `<li><button class="entry" data-action="edit-entry" data-id="${e.id}">
     <span class="dot" style="background:${esc(type?.color)}"></span>
     <span class="main">
-      <span class="name">${esc(type?.name ?? 'Unknown')}</span> ${type ? polarityBadge(type) : ''}
+      <span class="name">${esc(type?.name ?? 'Unknown')}</span> ${type ? polarityBadge(type) : ''} ${severityBadge(e, type)}
       ${meta ? `<span class="meta">${esc(meta)}</span>` : ''}
       ${e.note ? `<span class="note">${esc(e.note)}</span>` : ''}
     </span>
@@ -492,7 +499,11 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   const kindFields = (t) => t.kind === 'activity'
     ? `<label class="field"><span>Duration in minutes (optional)</span>
          <input type="number" name="duration" min="1" max="1440" step="1" inputmode="numeric" value="${e.durationMs ? Math.round(e.durationMs / 60000) : ''}"></label>`
-    : `<div class="field"><span class="field-label">Intensity (optional)</span><div class="segmented" role="radiogroup" aria-label="Intensity">
+    : isBad(t)
+      ? `<div class="field"><span class="field-label">Severity (optional)</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
+         ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="intensity" value="${v}" ${String(e.intensity ?? '') === String(v) ? 'checked' : ''}><span class="${v ? `sev-${v}` : ''}">${v || '–'}<small>${v ? SEVERITY_LABELS[v] : 'Unknown'}</small></span></label>`).join('')}
+       </div></div>`
+      : `<div class="field"><span class="field-label">Intensity (optional)</span><div class="segmented" role="radiogroup" aria-label="Intensity">
          ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="intensity" value="${v}" ${String(e.intensity ?? '') === String(v) ? 'checked' : ''}><span>${v || '–'}</span></label>`).join('')}
        </div></div>`;
 
@@ -661,7 +672,7 @@ const ACTIONS = {
     const entry = M.sortedEntries(state).find((e) => e.typeId === type.id);
     toast(`Logged ${type.name}.`, {
       actions: [
-        { label: 'Details', fn: () => entrySheet({ entry: state.entries.find((e) => e.id === entry.id) }) },
+        { label: isBad(type) ? 'Severity' : 'Details', fn: () => entrySheet({ entry: state.entries.find((e) => e.id === entry.id) }) },
         { label: 'Undo', fn: () => apply((s) => M.deleteEntry(s, entry.id)) },
       ],
     });

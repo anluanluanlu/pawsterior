@@ -124,6 +124,14 @@ label.field > span, .field-label { display: block; font-size: 0.85rem; color: va
 .segmented input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
 .segmented input:disabled + span { opacity: 0.55; cursor: not-allowed; }
 
+/* Severity of bad mental states: a warm ramp from mild to severe. */
+.sev-1 { --sev: #d8c36a; } .sev-2 { --sev: #e0a95b; } .sev-3 { --sev: #e58a58; }
+.sev-4 { --sev: #e86a5c; } .sev-5 { --sev: #e0485a; }
+.badge.sev { color: var(--sev); border-color: color-mix(in srgb, var(--sev) 55%, transparent); background: color-mix(in srgb, var(--sev) 12%, transparent); }
+.segmented.severity span { flex-direction: column; gap: 1px; line-height: 1.15; padding: 6px 2px; box-shadow: inset 0 -3px 0 var(--sev, transparent); }
+.segmented.severity small { font-size: 0.62rem; font-weight: 400; opacity: 0.85; }
+.segmented.severity label { flex: 1 1 14%; }
+
 .swatches { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .swatches label { position: relative; }
 .swatches input[type=radio] { position: absolute; opacity: 0; }
