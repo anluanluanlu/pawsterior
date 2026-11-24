@@ -36,6 +36,13 @@ export class SoundEngine {
 
   /** Must be called from a user gesture the first time. */
   async unlock() {
+    // iOS: treat this as media playback so the ringer/silent switch doesn't mute Web Audio.
+    try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch { /* unsupported */ }
+    // A context iOS closed (or left stuck) after backgrounding can't be revived: start afresh.
+    if (this.ctx && this.ctx.state === 'closed') {
+      this.ctx = null; this.master = null; this.samples = null; this.samplesLoading = null;
+      this.scheduled.clear(); this.ambient = null;
+    }
     if (!this.ctx) {
       const AC = window.AudioContext || window.webkitAudioContext;
       if (!AC) return false;
@@ -45,8 +52,17 @@ export class SoundEngine {
       this.master.connect(this.ctx.destination);
     }
     if (this.ctx.state !== 'running') {
-      try { await this.ctx.resume(); } catch { /* ignore */ }
+      // resume() can hang forever on iOS ('interrupted'), so never wait on it unbounded.
+      try { await Promise.race([this.ctx.resume(), new Promise((r) => setTimeout(r, 1500))]); } catch { /* ignore */ }
     }
+    // Playing a silent buffer inside the gesture is what fully unlocks iOS output.
+    try {
+      const b = this.ctx.createBuffer(1, 1, 22050);
+      const s = this.ctx.createBufferSource();
+      s.buffer = b;
+      s.connect(this.ctx.destination);
+      s.start(0);
+    } catch { /* ignore */ }
     // Wait (briefly) for the recordings: the end gong is scheduled when the session
     // starts, so if they weren't decoded yet the synthesised fallback would be locked in.
     await Promise.race([this.loadSamples(), new Promise((r) => setTimeout(r, 3000))]);
@@ -61,7 +77,8 @@ export class SoundEngine {
     this.samplesLoading = Promise.all(Object.entries(SAMPLE_URLS).map(([kind, url]) =>
       fetch(url)
         .then((r) => r.arrayBuffer())
-        .then((data) => this.ctx.decodeAudioData(data))
+        // Callback form: older iOS Safari has no promise-returning decodeAudioData.
+        .then((data) => new Promise((res, rej) => this.ctx.decodeAudioData(data, res, rej)))
         .then((buf) => { this.samples[kind] = buf; })
         .catch(() => { /* keep the synthesised fallback */ })));
     return this.samplesLoading;
