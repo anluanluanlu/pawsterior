@@ -78,21 +78,25 @@ export function meditationSummary(state, now = Date.now()) {
   return { weekMinutes, weekDays };
 }
 
-/** Grid of the last `n` days: for each type with entries, which days it was logged. */
+/** Grid of the last `n` days: for each type with entries, which days it was logged and how strongly. */
 export function recentGrid(state, { now = Date.now(), n = 21 } = {}) {
   const today = dayIndex(now);
   const dayList = Array.from({ length: n }, (_, i) => today - (n - 1) + i);
   const byType = daysByType(state.entries.filter((e) => today - dayIndex(e.occurredAt) < n));
   const counts = new Map();
+  const levels = new Map();
   for (const e of state.entries) {
     const d = dayIndex(e.occurredAt);
     if (today - d >= n || d > today) continue;
     const key = `${e.typeId}:${d}`;
     counts.set(key, (counts.get(key) ?? 0) + 1);
+    if (e.intensity) levels.set(key, Math.max(levels.get(key) ?? 0, e.intensity));
   }
   const rows = state.types
     .filter((t) => byType.has(t.id))
     .sort((a, b) => (a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'activity' ? -1 : 1))
-    .map((t) => ({ type: t, cells: dayList.map((d) => counts.get(`${t.id}:${d}`) ?? 0) }));
+    .map((t) => ({ type: t, cells: dayList.map((d) => counts.get(`${t.id}:${d}`) ?? 0),
+      // Highest rating logged that day (0 if none rated), used to shade mental-state cells.
+      levels: dayList.map((d) => levels.get(`${t.id}:${d}`) ?? 0) }));
   return { days: dayList, rows };
 }

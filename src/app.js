@@ -110,17 +110,27 @@ function toLocalInput(ts) {
 const polarityBadge = (t) => t.kind === 'mental_state'
   ? `<span class="badge ${t.polarity}">${t.polarity === 'good' ? '▲ good' : '▼ negative'}</span>` : '';
 
-// Negative mental states are rated by severity; good ones keep the plain intensity scale.
+// Every mental state can be rated 1-5: negative ones by severity, good ones by strength.
 const SEVERITY_LABELS = ['', 'Barely', 'Mild', 'Moderate', 'Strong', 'Severe'];
+const STRENGTH_LABELS = ['', 'Slightly', 'Somewhat', 'Moderately', 'Very', 'Deeply'];
 const isNegative = (t) => t?.kind === 'mental_state' && t.polarity === 'negative';
+const isMental = (t) => t?.kind === 'mental_state';
+const scaleLabels = (t) => (isNegative(t) ? SEVERITY_LABELS : STRENGTH_LABELS);
 
-const severityBadge = (e, type) => isNegative(type) && e.intensity
-  ? `<span class="badge sev sev-${e.intensity}" title="Severity ${e.intensity}/5">${SEVERITY_LABELS[e.intensity]}</span>` : '';
+/** The type's colour, paler for level 1 and full strength at level 5 (`floor` = share of colour at level 1). */
+const shade = (color, level, floor = 0.22) =>
+  `color-mix(in srgb, ${color} ${Math.round((floor + (1 - floor) * (level - 1) / 4) * 100)}%, #1c1c1c)`;
+
+/** Style that colours a scale step: the warm ramp for negative states, the type's own colour for good ones. */
+const scaleStyle = (t, level) => (level && !isNegative(t) ? ` style="--sev:${shade(t.color, level, 0.5)}"` : '');
+const scaleClass = (t, level) => (level ? `sev-${level}` : '');
+
+const severityBadge = (e, type) => isMental(type) && e.intensity
+  ? `<span class="badge sev ${isNegative(type) ? `sev-${e.intensity}` : ''}"${scaleStyle(type, e.intensity)} title="${isNegative(type) ? 'Severity' : 'Strength'} ${e.intensity}/5">${scaleLabels(type)[e.intensity]}</span>` : '';
 
 function entryMeta(e, type) {
   const bits = [];
   if (e.durationMs) bits.push(fmtDuration(e.durationMs));
-  if (e.intensity && !isNegative(type)) bits.push(`intensity ${e.intensity}/5`);
   if (type?.isMeditation && e.sessionId) bits.push('timed session');
   return bits.join(' · ');
 }
@@ -257,7 +267,7 @@ const VIEWS = {
       ${grid.rows.length ? `<div class="card grid-wrap"><table class="heat">
         <thead><tr><th></th>${dayHead}</tr></thead>
         <tbody>${grid.rows.map((r) => `<tr><th scope="row" title="${esc(r.type.name)}">${esc(r.type.name)}</th>${r.cells.map((c, i) =>
-          `<td class="${c ? 'on' : ''}" style="--c:${esc(r.type.color)}" title="${esc(new Date(dayStart(grid.days[i])).toLocaleDateString())}: ${c}"></td>`).join('')}</tr>`).join('')}</tbody>
+          `<td class="${c ? 'on' : ''}" style="--c:${esc(isMental(r.type) && c ? shade(r.type.color, r.levels[i] || 3) : r.type.color)}" title="${esc(new Date(dayStart(grid.days[i])).toLocaleDateString())}: ${c}${r.levels[i] ? ` · ${scaleLabels(r.type)[r.levels[i]].toLowerCase()}` : ''}"></td>`).join('')}</tr>`).join('')}</tbody>
       </table></div>` : '<p class="muted small">Nothing logged in the last 3 weeks.</p>'}
 
       <h3>What goes together</h3>
@@ -506,12 +516,8 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   const kindFields = (t) => t.kind === 'activity'
     ? `<label class="field"><span>Duration in minutes (optional)</span>
          <input type="number" name="duration" min="1" max="1440" step="1" inputmode="numeric" value="${e.durationMs ? Math.round(e.durationMs / 60000) : ''}"></label>`
-    : isNegative(t)
-      ? `<div class="field"><span class="field-label">Severity (optional)</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
-         ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="intensity" value="${v}" ${String(e.intensity ?? '') === String(v) ? 'checked' : ''}><span class="${v ? `sev-${v}` : ''}">${v || '–'}<small>${v ? SEVERITY_LABELS[v] : 'Unknown'}</small></span></label>`).join('')}
-       </div></div>`
-      : `<div class="field"><span class="field-label">Intensity (optional)</span><div class="segmented" role="radiogroup" aria-label="Intensity">
-         ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="intensity" value="${v}" ${String(e.intensity ?? '') === String(v) ? 'checked' : ''}><span>${v || '–'}</span></label>`).join('')}
+    : `<div class="field"><span class="field-label">${isNegative(t) ? 'Severity' : 'Strength'} (optional)</span><div class="segmented severity" role="radiogroup" aria-label="${isNegative(t) ? 'Severity' : 'Strength'}">
+         ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="intensity" value="${v}" ${String(e.intensity ?? '') === String(v) ? 'checked' : ''}><span class="${scaleClass(t, v)}"${scaleStyle(t, v)}>${v || '–'}<small>${v ? scaleLabels(t)[v] : 'Unknown'}</small></span></label>`).join('')}
        </div></div>`;
 
   openSheet(`<form>
@@ -558,14 +564,14 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   });
 }
 
-/** Opens when a type is tapped: the time defaults to now but can be changed; negative states also get a severity. */
+/** Opens when a type is tapped: the time defaults to now but can be changed; mental states also get a severity or strength. */
 function logSheet(type) {
-  const negative = isNegative(type);
+  const mental = isMental(type);
   openSheet(`<form>
       <h2 id="sheet-title"><span class="dot" style="background:${esc(type.color)}"></span>${esc(type.name)}</h2>
       <label class="field"><span>When</span><input type="datetime-local" name="when" required value="${toLocalInput(Date.now())}" max="${toLocalInput(Date.now() + 60000)}"></label>
-      ${negative ? `<div class="field"><span class="field-label">How severe was it? (optional)</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
-        ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="sev" value="${v}" ${v === '' ? 'checked' : ''}><span class="${v ? `sev-${v}` : ''}">${v || '–'}<small>${v ? SEVERITY_LABELS[v] : 'Unknown'}</small></span></label>`).join('')}
+      ${mental ? `<div class="field"><span class="field-label">${isNegative(type) ? 'How severe was it?' : 'How strongly?'} (optional)</span><div class="segmented severity" role="radiogroup" aria-label="${isNegative(type) ? 'Severity' : 'Strength'}">
+        ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="sev" value="${v}" ${v === '' ? 'checked' : ''}><span class="${scaleClass(type, v)}"${scaleStyle(type, v)}>${v || '–'}<small>${v ? scaleLabels(type)[v] : 'Unknown'}</small></span></label>`).join('')}
       </div></div>` : ''}
       <label class="field"><span>Details (optional)</span><textarea name="note" maxlength="${M.CONFIG.maxNoteLength}"></textarea></label>
       <div class="sheet-actions">
@@ -582,7 +588,7 @@ function logSheet(type) {
       const occurredAt = new Date(form.when.value).getTime();
       if (apply((s) => M.logEntry(s, { typeId: type.id, occurredAt, intensity, note: form.note.value }))) {
         closeSheet();
-        toast(`Logged ${type.name}${intensity ? `: ${SEVERITY_LABELS[intensity].toLowerCase()}` : ''}.`);
+        toast(`Logged ${type.name}${intensity ? `: ${scaleLabels(type)[intensity].toLowerCase()}` : ''}.`);
       }
     });
   });

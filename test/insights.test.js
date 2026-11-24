@@ -97,3 +97,11 @@ test('recentGrid lays out the last n days per type', () => {
   assert.deepEqual(g.rows[0].cells, [0, 2, 0]);
   assert.deepEqual(g.rows[1].cells, [0, 0, 1]);
 });
+
+test('recentGrid reports the highest rating logged per day', () => {
+  const s = stateWith([['Felt calm', 9], ['Felt calm', 9], ['Felt calm', 10]]);
+  const calm = s.entries.filter((e) => e.typeId === s.types.find((t) => t.name === 'Felt calm').id);
+  calm[0].intensity = 2; calm[1].intensity = 4;
+  const g = recentGrid(s, { now: at(10, 20), n: 3 });
+  assert.deepEqual(g.rows[0].levels, [0, 4, 0], 'max of the day; unrated days are 0');
+});
