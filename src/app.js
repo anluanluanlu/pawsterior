@@ -344,12 +344,15 @@ function setupView() {
     <section class="card">
       <h2>Meditate</h2>
       <h3>Duration</h3>
-      <div class="chips">${DURATIONS.map((m) => `<button class="chip" aria-pressed="${m === mins}" data-action="set-duration" data-v="${m}">${m} min</button>`).join('')}</div>
-      <label class="field" style="margin-top:12px"><span>Or minutes</span>
-        <input type="number" inputmode="numeric" min="1" max="240" step="1" value="${mins}" data-change="custom-duration" aria-label="Custom duration in minutes"></label>
-      <h3>Warm-up</h3>
-      <label class="field"><span>Seconds before the timer starts (a wood click marks the start of meditation, 0 for none)</span>
-        <input type="number" inputmode="numeric" min="0" max="300" step="5" value="${Math.round(warmupMs / 1000)}" data-change="custom-warmup" aria-label="Warm-up in seconds"></label>
+      <div class="chips">${DURATIONS.map((m) => `<button class="chip" aria-pressed="${m === mins}" data-action="set-duration" data-v="${m}">${m} min</button>`).join('')}
+        <label class="chip custom" aria-pressed="${!DURATIONS.includes(mins)}"><span>or</span>
+          <input type="number" inputmode="numeric" min="1" max="240" step="1" value="${mins}" data-change="custom-duration" aria-label="Custom duration in minutes"><span>min</span></label>
+      </div>
+      <h3>Warm-up time</h3>
+      <div class="chips">
+        <label class="chip custom" aria-pressed="false">
+          <input type="number" inputmode="numeric" min="0" max="300" step="5" value="${Math.round(warmupMs / 1000)}" data-change="custom-warmup" aria-label="Warm-up time in seconds"><span>sec</span></label>
+      </div>
       <h3>Sound</h3>
       <div class="chips">${M.AMBIENTS.map((a) => `<button class="chip" aria-pressed="${a === s.ambient}" data-action="set-ambient" data-v="${a}">${AMBIENT_LABELS[a]}</button>`).join('')}</div>
       <h3>Hear the sounds</h3>
@@ -400,8 +403,8 @@ function updateTimer() {
   document.title = `${fmtClock(remaining)} · ${APP_TITLE}`;
   const $t = document.getElementById('timer-phase');
   if (!$t) return;
-  $t.textContent = warming ? 'Warm up' : 'Meditation';
-  document.getElementById('timer-sub').textContent = fmtDuration(total);
+  $t.textContent = fmtClock(remaining);
+  document.getElementById('timer-sub').textContent = warming ? 'Warm up' : 'Meditation';
   const ring = document.getElementById('ring-progress');
   if (ring) ring.style.strokeDashoffset = String(RING_C * (remaining / total));
   document.querySelector('.session')?.classList.toggle('warmup', warming);
