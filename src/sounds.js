@@ -47,21 +47,24 @@ export class SoundEngine {
     if (this.ctx.state !== 'running') {
       try { await this.ctx.resume(); } catch { /* ignore */ }
     }
-    this.loadSamples();
+    // Wait (briefly) for the recordings: the end gong is scheduled when the session
+    // starts, so if they weren't decoded yet the synthesised fallback would be locked in.
+    await Promise.race([this.loadSamples(), new Promise((r) => setTimeout(r, 3000))]);
     return this.ready;
   }
 
   /** Fetch and decode the start/end recordings once; until then the synthesised sounds play. */
   loadSamples() {
-    if (this.samples || !this.ctx) return;
+    if (this.samplesLoading) return this.samplesLoading;
+    if (!this.ctx) return Promise.resolve();
     this.samples = {};
-    for (const [kind, url] of Object.entries(SAMPLE_URLS)) {
+    this.samplesLoading = Promise.all(Object.entries(SAMPLE_URLS).map(([kind, url]) =>
       fetch(url)
         .then((r) => r.arrayBuffer())
         .then((data) => this.ctx.decodeAudioData(data))
         .then((buf) => { this.samples[kind] = buf; })
-        .catch(() => { /* keep the synthesised fallback */ });
-    }
+        .catch(() => { /* keep the synthesised fallback */ })));
+    return this.samplesLoading;
   }
 
   /** Play a decoded recording `delaySec` from now; null if it isn't loaded. */

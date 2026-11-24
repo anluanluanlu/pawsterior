@@ -37,7 +37,7 @@ function load() {
       const s = JSON.parse(raw);
       if (s?.version === M.SCHEMA_VERSION && Array.isArray(s.types) && Array.isArray(s.entries)) {
         // Fill in settings added since the data was saved.
-        return { ...s, settings: { ...M.createInitialState().settings, ...s.settings } };
+        return { ...M.migrateLegacy(s), settings: { ...M.createInitialState().settings, ...s.settings } };
       }
     }
   } catch { /* fall through to a fresh state */ }
@@ -110,17 +110,17 @@ function toLocalInput(ts) {
 const polarityBadge = (t) => t.kind === 'mental_state'
   ? `<span class="badge ${t.polarity}">${t.polarity === 'good' ? '▲ good' : '▼ negative'}</span>` : '';
 
-// Bad mental states are rated by severity; good ones keep the plain intensity scale.
+// Negative mental states are rated by severity; good ones keep the plain intensity scale.
 const SEVERITY_LABELS = ['', 'Barely', 'Mild', 'Moderate', 'Strong', 'Severe'];
-const isBad = (t) => t?.kind === 'mental_state' && t.polarity === 'bad';
+const isNegative = (t) => t?.kind === 'mental_state' && t.polarity === 'negative';
 
-const severityBadge = (e, type) => isBad(type) && e.intensity
+const severityBadge = (e, type) => isNegative(type) && e.intensity
   ? `<span class="badge sev sev-${e.intensity}" title="Severity ${e.intensity}/5">${SEVERITY_LABELS[e.intensity]}</span>` : '';
 
 function entryMeta(e, type) {
   const bits = [];
   if (e.durationMs) bits.push(fmtDuration(e.durationMs));
-  if (e.intensity && !isBad(type)) bits.push(`intensity ${e.intensity}/5`);
+  if (e.intensity && !isNegative(type)) bits.push(`intensity ${e.intensity}/5`);
   if (type?.isMeditation && e.sessionId) bits.push('timed session');
   return bits.join(' · ');
 }
@@ -172,7 +172,7 @@ const VIEWS = {
     const live = state.types.filter((t) => !t.archived);
     const acts = live.filter((t) => t.kind === 'activity');
     const good = live.filter((t) => t.kind === 'mental_state' && t.polarity === 'good');
-    const bad = live.filter((t) => t.kind === 'mental_state' && t.polarity === 'bad');
+    const negative = live.filter((t) => t.kind === 'mental_state' && t.polarity === 'negative');
     const btns = (list) => list.length
       ? `<div class="type-grid">${list.map((t) => `<button class="type-btn" style="--c:${esc(t.color)}" data-action="quick-log" data-id="${t.id}">
           <span class="name">${esc(t.name)}</span></button>`).join('')}</div>`
@@ -188,7 +188,7 @@ const VIEWS = {
       <p class="muted small">Tap to log it. The time defaults to now, and you can change it.</p>
       <h3>Activities &amp; happenings</h3>${btns(acts)}
       <h3>Mental state · good signs</h3>${btns(good)}
-      <h3>Mental state · bad signs</h3>${btns(bad)}
+      <h3>Mental state · negative signs</h3>${btns(negative)}
       <h3>Log</h3>
       ${groups.size === 0 ? '<p class="muted small">Nothing logged yet.</p>' : ''}
       ${[...groups].map(([d, es]) => `
@@ -236,7 +236,7 @@ const VIEWS = {
     const pairHtml = pairs.slice(0, 30).map((p) => {
       const a = M.getType(state, p.activityId), s = M.getType(state, p.stateId);
       const pts = Math.round(p.diff * 100);
-      const cls = p.favorable === null ? '' : p.favorable ? 'good' : 'bad';
+      const cls = p.favorable === null ? '' : p.favorable ? 'good' : 'negative';
       const arrow = pts > 0 ? `↑ ${pts}` : pts < 0 ? `↓ ${-pts}` : '±0';
       return `<div class="pair">
         <div class="title row"><span class="dot" style="background:${esc(s.color)}"></span>
@@ -506,7 +506,7 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   const kindFields = (t) => t.kind === 'activity'
     ? `<label class="field"><span>Duration in minutes (optional)</span>
          <input type="number" name="duration" min="1" max="1440" step="1" inputmode="numeric" value="${e.durationMs ? Math.round(e.durationMs / 60000) : ''}"></label>`
-    : isBad(t)
+    : isNegative(t)
       ? `<div class="field"><span class="field-label">Severity (optional)</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
          ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="intensity" value="${v}" ${String(e.intensity ?? '') === String(v) ? 'checked' : ''}><span class="${v ? `sev-${v}` : ''}">${v || '–'}<small>${v ? SEVERITY_LABELS[v] : 'Unknown'}</small></span></label>`).join('')}
        </div></div>`
@@ -558,13 +558,13 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   });
 }
 
-/** Opens when a type is tapped: the time defaults to now but can be changed; bad states also get a severity. */
+/** Opens when a type is tapped: the time defaults to now but can be changed; negative states also get a severity. */
 function logSheet(type) {
-  const bad = isBad(type);
+  const negative = isNegative(type);
   openSheet(`<form>
       <h2 id="sheet-title"><span class="dot" style="background:${esc(type.color)}"></span>${esc(type.name)}</h2>
       <label class="field"><span>When</span><input type="datetime-local" name="when" required value="${toLocalInput(Date.now())}" max="${toLocalInput(Date.now() + 60000)}"></label>
-      ${bad ? `<div class="field"><span class="field-label">How severe was it? (optional)</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
+      ${negative ? `<div class="field"><span class="field-label">How severe was it? (optional)</span><div class="segmented severity" role="radiogroup" aria-label="Severity">
         ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="sev" value="${v}" ${v === '' ? 'checked' : ''}><span class="${v ? `sev-${v}` : ''}">${v || '–'}<small>${v ? SEVERITY_LABELS[v] : 'Unknown'}</small></span></label>`).join('')}
       </div></div>` : ''}
       <label class="field"><span>Details (optional)</span><textarea name="note" maxlength="${M.CONFIG.maxNoteLength}"></textarea></label>
@@ -590,7 +590,7 @@ function logSheet(type) {
 
 function typeSheet(type = null) {
   const isNew = !type;
-  const t = type ?? { name: '', kind: 'activity', polarity: 'bad', color: PALETTE[Math.floor(Math.random() * PALETTE.length)] };
+  const t = type ?? { name: '', kind: 'activity', polarity: 'negative', color: PALETTE[Math.floor(Math.random() * PALETTE.length)] };
   const used = type ? M.entriesOfType(state, type.id).length : 0;
   const kindLocked = !!type && (type.isMeditation || used > 0);
   const swatches = [...new Set([...PALETTE, t.color])].map((c) =>
@@ -604,7 +604,7 @@ function typeSheet(type = null) {
       </div>${kindLocked ? `<p class="muted small" style="margin-top:6px">${type.isMeditation ? 'Meditation is always an activity.' : 'The kind is fixed once something is logged against it.'}</p>` : ''}</div>
       <div class="field" id="polarity-field"><span class="field-label">This state suggests…</span><div class="segmented">
         <label><input type="radio" name="polarity" value="good" ${t.polarity === 'good' ? 'checked' : ''}><span>▲ Good mental health</span></label>
-        <label><input type="radio" name="polarity" value="bad" ${t.polarity !== 'good' ? 'checked' : ''}><span>▼ Bad mental health</span></label>
+        <label><input type="radio" name="polarity" value="negative" ${t.polarity !== 'good' ? 'checked' : ''}><span>▼ Negative mental health</span></label>
       </div></div>
       <div class="field"><span class="field-label">Colour</span><div class="swatches">${swatches}</div></div>
       <div class="sheet-actions">
@@ -865,9 +865,9 @@ function accountCard() {
     conflict: 'The cloud copy and this device both changed.',
     idle: st.dirty ? 'Waiting to sync…' : st.lastSyncedAt ? `Synced ${ago(st.lastSyncedAt)}` : 'Not synced yet',
   }[st.phase];
-  const bad = st.phase === 'error' || st.phase === 'conflict';
+  const failing = st.phase === 'error' || st.phase === 'conflict';
   return `<div class="card">
-    <p class="small ${bad ? '' : 'muted'}" ${bad ? 'style="color:var(--bad)"' : ''}>${esc(line)}</p>
+    <p class="small ${failing ? '' : 'muted'}" ${failing ? 'style="color:var(--negative)"' : ''}>${esc(line)}</p>
     <div class="row wrap">
       <button data-action="sync-now">${st.phase === 'conflict' ? 'Resolve…' : 'Sync now'}</button>
       <button data-action="sign-out">Sign out</button>
@@ -883,11 +883,11 @@ function showGate() {
   $view.innerHTML = `<section class="card gate">
     <h2>Sign in to Pawsterior</h2>
     <p class="muted small">Your data is kept in your account, so it is safe and available on all your devices.</p>
-    ${st.error ? `<p class="small" style="color:var(--bad)">${esc(st.error)}</p>` : ''}
+    ${st.error ? `<p class="small" style="color:var(--negative)">${esc(st.error)}</p>` : ''}
     <form>
       <label class="field"><span>Email</span><input name="email" type="email" required autocomplete="username" inputmode="email" autocapitalize="off" spellcheck="false"></label>
       <label class="field"><span>Password (at least 10 characters to create an account)</span><input name="password" type="password" required maxlength="200" autocomplete="current-password"></label>
-      <p class="small" id="auth-error" role="alert" style="color:var(--bad)" hidden></p>
+      <p class="small" id="auth-error" role="alert" style="color:var(--negative)" hidden></p>
       <div class="row wrap">
         <button type="submit" class="primary">Sign in</button>
         <button type="button" data-act="register">Create account</button>
@@ -953,7 +953,7 @@ function applyRemote(remote) {
   if (remote?.version !== M.SCHEMA_VERSION || !Array.isArray(remote.types) || !Array.isArray(remote.entries)) {
     throw new Error('The cloud data is from a newer version of the app. Reload to update.');
   }
-  state = { ...remote, session: state.session, settings: { ...M.createInitialState().settings, ...remote.settings } };
+  state = { ...M.migrateLegacy(remote), session: state.session, settings: { ...M.createInitialState().settings, ...remote.settings } };
   persist();
   render();
 }

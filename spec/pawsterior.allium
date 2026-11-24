@@ -40,8 +40,8 @@ config {
 --                 (couldn't fall asleep, catastrophic thoughts)
 enum EntryKind { activity | mental_state }
 
--- Whether a mental state suggests good or bad mental health.
-enum Polarity { good | bad }
+-- Whether a mental state suggests good or negative mental health.
+enum Polarity { good | negative }
 
 enum AmbientSound { silence | brown_noise | rain | ocean }
 
@@ -147,12 +147,12 @@ default EntryType met_friends = {
 }
 
 default EntryType could_not_sleep = {
-    name: "Couldn't fall asleep", kind: mental_state, polarity: bad,
+    name: "Couldn't fall asleep", kind: mental_state, polarity: negative,
     colour: "#e07a7a", archived: false, is_meditation: false
 }
 
 default EntryType catastrophic_thoughts = {
-    name: "Catastrophic thoughts", kind: mental_state, polarity: bad,
+    name: "Catastrophic thoughts", kind: mental_state, polarity: negative,
     colour: "#d9a05b", archived: false, is_meditation: false
 }
 
@@ -461,7 +461,7 @@ surface Log {
 
     @guidance
         -- Logging should be one tap plus an optional detail sheet.
-        -- Group activities and mental states; tint good and bad states apart.
+        -- Group activities and mental states; tint good and negative states apart.
 }
 
 surface History {
@@ -506,7 +506,7 @@ surface Insights {
         -- share of the other days on which S was logged. Hide pairs where
         -- either group has fewer than config.min_days_per_insight_group days.
         -- Rank by the size of the difference. A difference is favourable
-        -- when a good state is more common, or a bad state less common, with A.
+        -- when a good state is more common, or a negative state less common, with A.
         -- Always state that this shows association, not cause.
         -- Intensity is descriptive only: it never weights insights, which
         -- count presence or absence per day.

@@ -10,7 +10,7 @@ test('initial state seeds exactly one meditation type and the example types', ()
   const s = M.createInitialState(T0);
   assert.equal(s.types.filter((t) => t.isMeditation).length, 1);
   assert.equal(M.meditationType(s).kind, 'activity');
-  assert.equal(byName(s, "Couldn't fall asleep").polarity, 'bad');
+  assert.equal(byName(s, "Couldn't fall asleep").polarity, 'negative');
   assert.equal(byName(s, 'Felt calm').polarity, 'good');
   assert.equal(byName(s, 'Met friends').polarity, null);
 });
@@ -26,7 +26,7 @@ test('defineType validates name, kind and polarity', () => {
   assert.throws(() => M.defineType(s, { name: 'went FOR a walk', kind: 'activity' }), M.ValidationError);
   assert.throws(() => M.defineType(s, { name: '', kind: 'activity' }), M.ValidationError);
   assert.throws(() => M.defineType(s, { name: 'x'.repeat(61), kind: 'activity' }), M.ValidationError);
-  assert.throws(() => M.defineType(s, { name: 'Anxious', kind: 'mental_state' }), /good or a bad/);
+  assert.throws(() => M.defineType(s, { name: 'Anxious', kind: 'mental_state' }), /good or a negative/);
   assert.throws(() => M.defineType(s, { name: 'Anxious', kind: 'mood' }), M.ValidationError);
 });
 
@@ -179,7 +179,7 @@ test('startSession validates duration and interval bell', () => {
   assert.throws(() => M.startSession(s, { plannedMs: 5 * MIN, ambient: 'whale' }, T0), /ambient/);
 });
 
-test('export / import round-trips and rejects bad files', () => {
+test('export / import round-trips and rejects invalid files', () => {
   let s = M.createInitialState(T0);
   s = M.logEntry(s, { typeId: byName(s, 'Felt calm').id, occurredAt: T0, intensity: 2, note: 'ok' }, T0);
   s = M.startSession(s, { plannedMs: 5 * MIN }, T0);

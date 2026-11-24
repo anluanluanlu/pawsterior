@@ -153,8 +153,8 @@ test('CORS allows only the configured origins', async () => {
   const ok = await call(env, 'OPTIONS', '/data', { origin: 'https://app.example' });
   assert.equal(ok.status, 204);
   assert.equal(ok.headers.get('access-control-allow-origin'), 'https://app.example');
-  const bad = await call(env, 'OPTIONS', '/data', { origin: 'https://evil.example' });
-  assert.equal(bad.headers.get('access-control-allow-origin'), null);
+  const denied = await call(env, 'OPTIONS', '/data', { origin: 'https://evil.example' });
+  assert.equal(denied.headers.get('access-control-allow-origin'), null);
   const local = await call(env, 'OPTIONS', '/data', { origin: 'http://localhost:8080' });
   assert.equal(local.headers.get('access-control-allow-origin'), null);
   const dev = await call(newEnv({ ALLOW_LOCALHOST: 'true' }), 'OPTIONS', '/data', { origin: 'http://localhost:8080' });

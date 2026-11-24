@@ -23,7 +23,7 @@ test('dayIndex is a local calendar day and survives DST changes', () => {
 });
 
 test('computeInsights compares days with and without an activity', () => {
-  // Meditation on days 1-5; bad sleep on days 3 and 8, 9, 10. Data spans days 1-10.
+  // Meditation on days 1-5; poor sleep on days 3 and 8, 9, 10. Data spans days 1-10.
   const s = stateWith([
     ...[1, 2, 3, 4, 5].map((d) => ['Meditation', d, 7, { durationMs: 600_000 }]),
     ...[3, 8, 9, 10].map((d) => ["Couldn't fall asleep", d, 23]),
@@ -38,7 +38,7 @@ test('computeInsights compares days with and without an activity', () => {
   assert.equal(p.withRate, 0.2);
   assert.equal(p.withoutRate, 0.6);
   assert.ok(Math.abs(p.diff + 0.4) < 1e-9);
-  assert.equal(p.favorable, true, 'a bad state that is rarer with the activity is favourable');
+  assert.equal(p.favorable, true, 'a negative state that is rarer with the activity is favourable');
 });
 
 test('lag extends "with" to following days', () => {

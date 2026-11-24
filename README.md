@@ -7,7 +7,7 @@ Pawsterior is a website you can also install as an app (a Progressive Web App). 
 - **Meditate.** A timer with an adjustable warm-up (15 s by default, ended by a short wood snap), optional interval bells, and a singing-bowl end bell. Quick durations of 10, 12 or 15 minutes, or type any number. The stats show minutes and days meditated in the last 7 days. Choose an ambient sound: silence, brown noise, rain or ocean. You can pause, resume, finish early or discard. Each finished session is logged automatically, and afterwards you're asked how you feel.
 - **Log.** You define every entry type yourself. Each type is one of:
   - an **activity / happening**, such as "Met friends" or "Coffee after 4pm"; or
-  - a **mental state**, marked as a sign of *good* mental health ("Felt calm") or *bad* mental health ("Couldn't fall asleep", "Catastrophic thoughts").
+  - a **mental state**, marked as a sign of *good* mental health ("Felt calm") or *negative* mental health ("Couldn't fall asleep", "Catastrophic thoughts").
 
   One tap logs a type now. You can then add a time, a duration (activities), an intensity from 1 to 5 (mental states) or a note.
 - **History.** Every entry by day, with filtering and editing.

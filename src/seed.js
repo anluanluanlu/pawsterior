@@ -17,7 +17,7 @@ export function rng(seed) {
 }
 
 const NOTES = [
-  'Busy mind at first, settled after a few minutes.', 'Kept drifting to work.', 'Slept badly the night before.',
+  'Busy mind at first, settled after a few minutes.', 'Kept drifting to work.', 'Slept poorly the night before.',
   'Felt spacious.', 'Noisy neighbours.', 'Short but good.', 'Tired.', 'Walked to the lake afterwards.',
 ];
 
@@ -29,7 +29,7 @@ export function demoState({ now = Date.now(), seed = now, days = 56 } = {}) {
   const id = (name) => s.types.find((t) => t.name === name).id;
   // An extra type so the history has some variety.
   s = M.defineType(s, { name: 'Went for a run', kind: 'activity', color: '#e6c84f' }, now - days * DAY);
-  s = M.defineType(s, { name: 'Felt anxious', kind: 'mental_state', polarity: 'bad', color: '#d77fc4' }, now - days * DAY);
+  s = M.defineType(s, { name: 'Felt anxious', kind: 'mental_state', polarity: 'negative', color: '#d77fc4' }, now - days * DAY);
 
   const entries = [];
   const add = (typeId, ts, extra = {}) => {
@@ -54,7 +54,7 @@ export function demoState({ now = Date.now(), seed = now, days = 56 } = {}) {
     }
     if (rand() < 0.28) add(id('Met friends'), at(day, between(17, 21)), { durationMs: rand() < 0.5 ? between(1, 4) * 60 * 60_000 : null });
     if (rand() < 0.25) add(id('Went for a run'), at(day, between(6, 18)), { durationMs: between(20, 60) * 60_000 });
-    // Meditating makes calm a bit likelier and bad sleep a bit less likely: gives Insights something to find.
+    // Meditating makes calm a bit likelier and poor sleep a bit less likely: gives Insights something to find.
     if (rand() < (meditated ? 0.5 : 0.22)) add(id('Felt calm'), at(day, between(10, 21)), { intensity: between(2, 5) });
     if (rand() < (meditated ? 0.1 : 0.32)) add(id("Couldn't fall asleep"), at(day, between(0, 3)), { intensity: between(1, 5), note: rand() < 0.3 ? pick(NOTES) : null });
     if (rand() < 0.2) add(id('Catastrophic thoughts'), at(day, between(8, 22)), { intensity: between(1, 5) });

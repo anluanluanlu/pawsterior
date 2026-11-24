@@ -3,7 +3,13 @@
 // No DOM, no storage: app.js handles those.
 
 export const KINDS = ['activity', 'mental_state'];
-export const POLARITIES = ['good', 'bad'];
+export const POLARITIES = ['good', 'negative'];
+
+/** Older saves called negative states "bad"; rename them in a loaded state. */
+export function migrateLegacy(s) {
+  if (!s || !Array.isArray(s.types) || !s.types.some((t) => t.polarity === 'bad')) return s;
+  return { ...s, types: s.types.map((t) => (t.polarity === 'bad' ? { ...t, polarity: 'negative' } : t)) };
+}
 export const AMBIENTS = ['silence', 'brown_noise', 'rain', 'ocean'];
 
 const MIN = 60_000;
@@ -52,8 +58,8 @@ export function createInitialState(now = Date.now()) {
     types: [
       t('Meditation', 'activity', null, '#7c9cff', true),
       t('Met friends', 'activity', null, '#5cc8a8'),
-      t("Couldn't fall asleep", 'mental_state', 'bad', '#e07a7a'),
-      t('Catastrophic thoughts', 'mental_state', 'bad', '#d9a05b'),
+      t("Couldn't fall asleep", 'mental_state', 'negative', '#e07a7a'),
+      t('Catastrophic thoughts', 'mental_state', 'negative', '#d9a05b'),
       t('Felt calm', 'mental_state', 'good', '#8fd16a'),
     ],
     entries: [],
@@ -80,7 +86,7 @@ function validateTypeFields(state, { name, kind, polarity, color }, selfId = nul
   if (!KINDS.includes(kind)) fail('Choose activity or mental state.');
   let p = null;
   if (kind === 'mental_state') {
-    if (!POLARITIES.includes(polarity)) fail('Say whether this state is a good or a bad sign.');
+    if (!POLARITIES.includes(polarity)) fail('Say whether this state is a good or a negative sign.');
     p = polarity;
   }
   const c = typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#9aa4b2';
@@ -269,7 +275,7 @@ export function importState(json) {
   if (raw.version !== SCHEMA_VERSION) fail(`Unsupported export version: ${raw.version}.`);
   if (!Array.isArray(raw.types) || !Array.isArray(raw.entries)) fail('That file is not a Pawsterior export.');
 
-  const rawTypes = raw.types.map((t) => {
+  const rawTypes = migrateLegacy(raw).types.map((t) => {
     if (typeof t?.id !== 'string') fail('A type is missing its id.');
     return {
       id: t.id, name: normalizeName(t.name), kind: t.kind, polarity: t.kind === 'mental_state' ? t.polarity : null,
