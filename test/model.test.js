@@ -200,3 +200,46 @@ test('export / import round-trips and rejects invalid files', () => {
   dupe.types.push({ ...dupe.types[1], id: 'other' });
   assert.throws(() => M.importState(dupe), /already exists/);
 });
+
+test('ratings: defaults, per-type names and descriptions, and entries keep the scale they were logged under', () => {
+  let s = M.createInitialState(T0);
+  const sleep = byName(s, "Couldn't fall asleep");
+  const cat = byName(s, 'Catastrophic thoughts');
+  assert.deepEqual(M.ratingOf(sleep), { name: 'Severity', labels: ['', '', '', '', ''] });
+  assert.equal(M.ratingOf(byName(s, 'Felt calm')).name, 'Strength');
+  assert.deepEqual(M.ratingOf(cat), { name: 'Pull', labels: ['Barely', 'A little', 'Moderately', 'Quite a bit', 'A lot'] });
+
+  s = M.logEntry(s, { typeId: cat.id, occurredAt: T0, intensity: 3 }, T0);
+  s = M.editType(s, cat.id, { rating: { name: ' Weight ', labels: ['', '', '', '', 'Huge'] } });
+  assert.deepEqual(M.ratingOf(byName(s, 'Catastrophic thoughts')), { name: 'Weight', labels: ['', '', '', '', 'Huge'] });
+  assert.equal(s.entries[0].scale.name, 'Pull', 'the earlier entry keeps the wording it was rated under');
+  s = M.logEntry(s, { typeId: cat.id, occurredAt: T0, intensity: 5 }, T0);
+  assert.equal(s.entries[1].scale.name, 'Weight');
+  s = M.logEntry(s, { typeId: cat.id, occurredAt: T0 }, T0);
+  assert.equal(s.entries[2].scale, null, 'unrated entries carry no scale');
+
+  s = M.editType(s, cat.id, { rating: { name: '', labels: ['', '', '', '', ''] } });
+  assert.equal(byName(s, 'Catastrophic thoughts').rating, null, 'a blank rating returns to the defaults');
+  assert.throws(() => M.editType(s, cat.id, { rating: { name: 'x'.repeat(31), labels: [] } }), /Rating names/);
+  assert.throws(() => M.editType(s, cat.id, { rating: { name: 'ok', labels: ['x'.repeat(21)] } }), /descriptions/);
+  const friends = M.editType(s, byName(s, 'Met friends').id, { rating: { name: 'Pull', labels: [] } });
+  assert.equal(byName(friends, 'Met friends').rating, null, 'activities have no rating');
+});
+
+test('older saves: Catastrophic thoughts gets Pull once, and rated entries keep their old wording', () => {
+  const old = M.createInitialState(T0);
+  const cat = byName(old, 'Catastrophic thoughts');
+  delete cat.rating;
+  const logged = { id: 'e1', typeId: cat.id, occurredAt: T0, durationMs: null, intensity: 4, note: null, sessionId: null };
+  const migrated = M.migrateLegacy({ ...old, entries: [logged] });
+  assert.equal(byName(migrated, 'Catastrophic thoughts').rating.name, 'Pull');
+  assert.deepEqual(migrated.entries[0].scale, { name: 'Severity', labels: ['Barely', 'Mild', 'Moderate', 'Strong', 'Severe'] });
+  const calm = byName(old, 'Felt calm');
+  const good = M.migrateLegacy({ ...old, entries: [{ ...logged, id: 'e2', typeId: calm.id, intensity: 2 }] });
+  assert.deepEqual(good.entries[0].scale, { name: 'Strength', labels: ['Slightly', 'Somewhat', 'Moderately', 'Very', 'Deeply'] });
+  assert.equal(M.migrateLegacy(migrated), migrated, 'migrating twice changes nothing');
+  const cleared = M.editType(migrated, cat.id, { rating: null });
+  assert.equal(M.migrateLegacy(cleared), cleared, 'a rating the user cleared is not put back');
+  const back = M.importState(M.exportState(migrated, T0));
+  assert.deepEqual(back.entries[0].scale, migrated.entries[0].scale);
+});

@@ -5,10 +5,44 @@
 export const KINDS = ['activity', 'mental_state'];
 export const POLARITIES = ['good', 'negative'];
 
-/** Older saves called negative states "bad"; rename them in a loaded state. */
+/** Rating given to "Catastrophic thoughts" (one-off): how strongly the thought pulled, not how bad it was. */
+const CATASTROPHIC_RATING = Object.freeze({
+  name: 'Pull', labels: Object.freeze(['Barely', 'A little', 'Moderately', 'Quite a bit', 'A lot']),
+});
+
+/** The fixed descriptions older versions showed, so earlier entries keep the wording they were rated under. */
+const LEGACY_NEGATIVE_LABELS = Object.freeze(['Barely', 'Mild', 'Moderate', 'Strong', 'Severe']);
+const LEGACY_GOOD_LABELS = Object.freeze(['Slightly', 'Somewhat', 'Moderately', 'Very', 'Deeply']);
+
+/**
+ * Brings an older save up to date:
+ * - negative states used to be called "bad";
+ * - "Catastrophic thoughts" gets the Pull rating (once: only when it has no rating setting yet);
+ * - rated entries without a recorded scale get the fixed one that was shown before, so that
+ *   changing a rating later never rewrites how earlier entries were rated.
+ */
 export function migrateLegacy(s) {
-  if (!s || !Array.isArray(s.types) || !s.types.some((t) => t.polarity === 'bad')) return s;
-  return { ...s, types: s.types.map((t) => (t.polarity === 'bad' ? { ...t, polarity: 'negative' } : t)) };
+  if (!s || !Array.isArray(s.types)) return s;
+  const before = new Map(s.types.map((t) => [t.id, t]));
+  let changed = false;
+  const types = s.types.map((t) => {
+    let n = t;
+    if (n.polarity === 'bad') n = { ...n, polarity: 'negative' };
+    if (n.rating === undefined && n.kind === 'mental_state' && n.name === 'Catastrophic thoughts') {
+      n = { ...n, rating: { name: CATASTROPHIC_RATING.name, labels: [...CATASTROPHIC_RATING.labels] } };
+    }
+    if (n !== t) changed = true;
+    return n;
+  });
+  const entries = Array.isArray(s.entries)
+    ? s.entries.map((e) => {
+      if (e.intensity == null || e.scale !== undefined || !before.has(e.typeId)) return e;
+      changed = true;
+      const { polarity } = before.get(e.typeId);
+      return { ...e, scale: { name: ratingOf({ polarity }).name, labels: [...(polarity === 'good' ? LEGACY_GOOD_LABELS : LEGACY_NEGATIVE_LABELS)] } };
+    })
+    : s.entries;
+  return changed ? { ...s, types, entries } : s;
 }
 export const AMBIENTS = ['silence', 'brown_noise', 'rain', 'ocean'];
 
@@ -23,6 +57,8 @@ export const CONFIG = Object.freeze({
   maxWarmupMs: 5 * MIN,
   maxTypeNameLength: 60,
   maxNoteLength: 500,
+  maxRatingNameLength: 30,
+  maxRatingLabelLength: 20,
   minIntensity: 1,
   maxIntensity: 5,
   futureEntryToleranceMs: 1 * MIN,
@@ -50,8 +86,8 @@ const nameKey = (name) => normalizeName(name).toLocaleLowerCase();
 // ---------------------------------------------------------------- defaults
 
 export function createInitialState(now = Date.now()) {
-  const t = (name, kind, polarity, color, isMeditation = false) => ({
-    id: newId(), name, kind, polarity, color, archived: false, isMeditation, createdAt: now,
+  const t = (name, kind, polarity, color, isMeditation = false, rating = null) => ({
+    id: newId(), name, kind, polarity, color, rating, archived: false, isMeditation, createdAt: now,
   });
   return {
     version: SCHEMA_VERSION,
@@ -59,7 +95,8 @@ export function createInitialState(now = Date.now()) {
       t('Meditation', 'activity', null, '#7c9cff', true),
       t('Met friends', 'activity', null, '#5cc8a8'),
       t("Couldn't fall asleep", 'mental_state', 'negative', '#e07a7a'),
-      t('Catastrophic thoughts', 'mental_state', 'negative', '#d9a05b'),
+      t('Catastrophic thoughts', 'mental_state', 'negative', '#d9a05b', false,
+        { name: CATASTROPHIC_RATING.name, labels: [...CATASTROPHIC_RATING.labels] }),
       t('Felt calm', 'mental_state', 'good', '#8fd16a'),
     ],
     entries: [],
@@ -75,9 +112,35 @@ export const meditationType = (state) => state.types.find((t) => t.isMeditation)
 export const entriesOfType = (state, typeId) => state.entries.filter((e) => e.typeId === typeId);
 export const sortedEntries = (state) => [...state.entries].sort((a, b) => b.occurredAt - a.occurredAt);
 
+// ---------------------------------------------------------------- ratings
+
+const RATING_STEPS = CONFIG.maxIntensity - CONFIG.minIntensity + 1;
+
+/** Normalises a rating ({ name, labels }): trimmed, bounded, always exactly one label slot per step. */
+function cleanRating(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+  const name = normalizeName(raw.name);
+  if (name.length > CONFIG.maxRatingNameLength) fail(`Rating names can be at most ${CONFIG.maxRatingNameLength} characters.`);
+  const given = Array.isArray(raw.labels) ? raw.labels : [];
+  const labels = Array.from({ length: RATING_STEPS }, (_, i) => normalizeName(given[i]));
+  if (labels.some((l) => l.length > CONFIG.maxRatingLabelLength)) {
+    fail(`Scale descriptions can be at most ${CONFIG.maxRatingLabelLength} characters.`);
+  }
+  return { name, labels };
+}
+
+/** What a type's 1-5 rating shows right now. Without settings: "Severity" (or "Strength" for good states), numbers only. */
+export function ratingOf(type) {
+  const r = type?.rating ? cleanRating(type.rating) : null;
+  return {
+    name: r?.name || (type?.polarity === 'good' ? 'Strength' : 'Severity'),
+    labels: r?.labels ?? Array(RATING_STEPS).fill(''),
+  };
+}
+
 // ---------------------------------------------------------------- entry types
 
-function validateTypeFields(state, { name, kind, polarity, color }, selfId = null) {
+function validateTypeFields(state, { name, kind, polarity, color, rating }, selfId = null) {
   const n = normalizeName(name);
   if (!n) fail('Give it a name.');
   if (n.length > CONFIG.maxTypeNameLength) fail(`Names can be at most ${CONFIG.maxTypeNameLength} characters.`);
@@ -90,7 +153,9 @@ function validateTypeFields(state, { name, kind, polarity, color }, selfId = nul
     p = polarity;
   }
   const c = typeof color === 'string' && /^#[0-9a-f]{6}$/i.test(color) ? color.toLowerCase() : '#9aa4b2';
-  return { name: n, kind, polarity: p, color: c };
+  let r = kind === 'mental_state' ? cleanRating(rating) : null;
+  if (r && !r.name && r.labels.every((l) => !l)) r = null;
+  return { name: n, kind, polarity: p, color: c, rating: r };
 }
 
 export function defineType(state, fields, now = Date.now()) {
@@ -101,7 +166,7 @@ export function defineType(state, fields, now = Date.now()) {
 
 export function editType(state, id, fields) {
   const type = getType(state, id) ?? fail('That type no longer exists.');
-  const merged = { name: type.name, kind: type.kind, polarity: type.polarity, color: type.color, ...fields };
+  const merged = { name: type.name, kind: type.kind, polarity: type.polarity, color: type.color, rating: type.rating, ...fields };
   const v = validateTypeFields(state, merged, id);
   if (v.kind !== type.kind) {
     if (type.isMeditation) fail('Meditation is always an activity.');
@@ -132,7 +197,7 @@ export function deleteType(state, id) {
 
 // ---------------------------------------------------------------- entries
 
-function validateEntryFields(type, { occurredAt, durationMs = null, intensity = null, note = null }, now) {
+function validateEntryFields(type, { occurredAt, durationMs = null, intensity = null, note = null, scale = null }, now) {
   if (!Number.isFinite(occurredAt)) fail('Pick a valid time.');
   if (occurredAt > now + CONFIG.futureEntryToleranceMs) fail('That time is in the future.');
   let d = null;
@@ -151,7 +216,10 @@ function validateEntryFields(type, { occurredAt, durationMs = null, intensity = 
   let n = note == null ? null : String(note).trim();
   if (n === '') n = null;
   if (n && n.length > CONFIG.maxNoteLength) fail(`Notes can be at most ${CONFIG.maxNoteLength} characters.`);
-  return { occurredAt, durationMs: d, intensity: i, note: n };
+  // A rated entry remembers the name and descriptions it was rated under, so later edits to the type's rating don't rewrite history.
+  const given = i == null ? null : cleanRating(scale);
+  const s = i == null ? null : given?.name ? given : ratingOf(type);
+  return { occurredAt, durationMs: d, intensity: i, scale: s, note: n };
 }
 
 export function logEntry(state, { typeId, ...fields }, now = Date.now()) {
@@ -166,7 +234,7 @@ export function editEntry(state, id, fields, now = Date.now()) {
   const entry = state.entries.find((e) => e.id === id) ?? fail('That entry no longer exists.');
   const type = getType(state, entry.typeId) ?? fail('Its type no longer exists.');
   const merged = {
-    occurredAt: entry.occurredAt, durationMs: entry.durationMs, intensity: entry.intensity, note: entry.note,
+    occurredAt: entry.occurredAt, durationMs: entry.durationMs, intensity: entry.intensity, scale: entry.scale, note: entry.note,
     ...fields,
   };
   const v = validateEntryFields(type, merged, now);
@@ -279,7 +347,7 @@ export function importState(json) {
     if (typeof t?.id !== 'string') fail('A type is missing its id.');
     return {
       id: t.id, name: normalizeName(t.name), kind: t.kind, polarity: t.kind === 'mental_state' ? t.polarity : null,
-      color: t.color, archived: !!t.archived, isMeditation: !!t.isMeditation, createdAt: Number(t.createdAt) || 0,
+      color: t.color, rating: t.rating, archived: !!t.archived, isMeditation: !!t.isMeditation, createdAt: Number(t.createdAt) || 0,
     };
   });
   // Re-validate every type against the others (also normalises name and colour).

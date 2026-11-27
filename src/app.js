@@ -110,12 +110,17 @@ function toLocalInput(ts) {
 const polarityBadge = (t) => t.kind === 'mental_state'
   ? `<span class="badge ${t.polarity}">${t.polarity === 'good' ? '▲ good' : '▼ negative'}</span>` : '';
 
-// Every mental state can be rated 1-5: negative ones by severity, good ones by strength.
-const SEVERITY_LABELS = ['', 'Barely', 'Mild', 'Moderate', 'Strong', 'Severe'];
-const STRENGTH_LABELS = ['', 'Slightly', 'Somewhat', 'Moderately', 'Very', 'Deeply'];
+// Every mental state can be rated 1-5. Each type names its own rating ("Severity", "Pull", ...) and
+// can describe the steps; by default that is "Severity" (or "Strength" for good states), numbers only.
+/** Example descriptions shown as placeholders in the rating editor. */
+const RATING_EXAMPLES = ['Barely', 'A little', 'Moderately', 'Quite a bit', 'A lot'];
 const isNegative = (t) => t?.kind === 'mental_state' && t.polarity === 'negative';
 const isMental = (t) => t?.kind === 'mental_state';
-const scaleLabels = (t) => (isNegative(t) ? SEVERITY_LABELS : STRENGTH_LABELS);
+/** The rating an entry was logged under (its own snapshot), else the type's current one. */
+const scaleOf = (type, entry) => entry?.scale ?? M.ratingOf(type);
+const stepLabel = (scale, level) => scale.labels[level - 1] || '';
+/** Short lower-case wording of a rating for toasts and tooltips, e.g. "a little" or "severity 3". */
+const stepText = (scale, level) => (stepLabel(scale, level) || `${scale.name} ${level}`).toLowerCase();
 
 /** The type's colour, paler for level 1 and full strength at level 5 (`floor` = share of colour at level 1). */
 const shade = (color, level, floor = 0.22) =>
@@ -125,8 +130,17 @@ const shade = (color, level, floor = 0.22) =>
 const scaleStyle = (t, level) => (level && !isNegative(t) ? ` style="--sev:${shade(t.color, level, 0.5)}"` : '');
 const scaleClass = (t, level) => (level ? `sev-${level}` : '');
 
-const severityBadge = (e, type) => isMental(type) && e.intensity
-  ? `<span class="badge sev ${isNegative(type) ? `sev-${e.intensity}` : ''}"${scaleStyle(type, e.intensity)} title="${isNegative(type) ? 'Severity' : 'Strength'} ${e.intensity}/5">${scaleLabels(type)[e.intensity]}</span>` : '';
+/** The 1-5 selector: a "–" (unknown) step, then 1-5 with their descriptions when the rating has any. */
+const scaleSteps = (type, scale, name, checked) => {
+  const described = scale.labels.some(Boolean);
+  return ['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="${name}" value="${v}" ${String(checked ?? '') === String(v) ? 'checked' : ''}><span class="${scaleClass(type, v)}"${scaleStyle(type, v)}>${v || '–'}${described ? `<small>${v ? esc(stepLabel(scale, v)) : 'Unknown'}</small>` : ''}</span></label>`).join('');
+};
+
+const severityBadge = (e, type) => {
+  if (!isMental(type) || !e.intensity) return '';
+  const scale = scaleOf(type, e);
+  return `<span class="badge sev ${isNegative(type) ? `sev-${e.intensity}` : ''}"${scaleStyle(type, e.intensity)} title="${esc(scale.name)} ${e.intensity}/5">${esc(stepLabel(scale, e.intensity) || e.intensity)}</span>`;
+};
 
 function entryMeta(e, type) {
   const bits = [];
@@ -267,7 +281,7 @@ const VIEWS = {
       ${grid.rows.length ? `<div class="card grid-wrap"><table class="heat">
         <thead><tr><th></th>${dayHead}</tr></thead>
         <tbody>${grid.rows.map((r) => `<tr><th scope="row" title="${esc(r.type.name)}">${esc(r.type.name)}</th>${r.cells.map((c, i) =>
-          `<td class="${c ? 'on' : ''}" style="--c:${esc(isMental(r.type) && c ? shade(r.type.color, r.levels[i] || 3) : r.type.color)}" title="${esc(new Date(dayStart(grid.days[i])).toLocaleDateString())}: ${c}${r.levels[i] ? ` · ${scaleLabels(r.type)[r.levels[i]].toLowerCase()}` : ''}"></td>`).join('')}</tr>`).join('')}</tbody>
+          `<td class="${c ? 'on' : ''}" style="--c:${esc(isMental(r.type) && c ? shade(r.type.color, r.levels[i] || 3) : r.type.color)}" title="${esc(new Date(dayStart(grid.days[i])).toLocaleDateString())}: ${c}${r.levels[i] ? ` · ${stepText(M.ratingOf(r.type), r.levels[i])}` : ''}"></td>`).join('')}</tr>`).join('')}</tbody>
       </table></div>` : '<p class="muted small">Nothing logged in the last 3 weeks.</p>'}
 
       <h3>What goes together</h3>
@@ -519,9 +533,12 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   const kindFields = (t) => t.kind === 'activity'
     ? `<label class="field"><span>Duration in minutes (optional)</span>
          <input type="number" name="duration" min="1" max="1440" step="1" inputmode="numeric" value="${e.durationMs ? Math.round(e.durationMs / 60000) : ''}"></label>`
-    : `<div class="field"><span class="field-label">${isNegative(t) ? 'Severity' : 'Strength'} (optional)</span><div class="segmented severity" role="radiogroup" aria-label="${isNegative(t) ? 'Severity' : 'Strength'}">
-         ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="intensity" value="${v}" ${String(e.intensity ?? '') === String(v) ? 'checked' : ''}><span class="${scaleClass(t, v)}"${scaleStyle(t, v)}>${v || '–'}<small>${v ? scaleLabels(t)[v] : 'Unknown'}</small></span></label>`).join('')}
+    : (() => {
+      const scale = isNew || t.id !== entry.typeId ? M.ratingOf(t) : scaleOf(t, e);
+      return `<div class="field"><span class="field-label">${esc(scale.name)} (optional)</span><div class="segmented severity" role="radiogroup" aria-label="${esc(scale.name)}">
+         ${scaleSteps(t, scale, 'intensity', e.intensity)}
        </div></div>`;
+    })();
 
   openSheet(`<form>
       <h2 id="sheet-title">${isNew ? 'Log' : `<span class="dot" style="background:${esc(type.color)}"></span>${esc(type.name)}`}</h2>
@@ -567,14 +584,15 @@ function entrySheet({ entry = null, typeId = null } = {}) {
   });
 }
 
-/** Opens when a type is tapped: the time defaults to now but can be changed; mental states also get a severity or strength. */
+/** Opens when a type is tapped: the time defaults to now but can be changed; mental states also get their 1-5 rating. */
 function logSheet(type) {
   const mental = isMental(type);
+  const scale = M.ratingOf(type);
   openSheet(`<form>
       <h2 id="sheet-title"><span class="dot" style="background:${esc(type.color)}"></span>${esc(type.name)}</h2>
       <label class="field"><span>When</span><input type="datetime-local" name="when" required value="${toLocalInput(Date.now())}" max="${toLocalInput(Date.now() + 60000)}"></label>
-      ${mental ? `<div class="field"><span class="field-label">${isNegative(type) ? 'How severe was it?' : 'How strongly?'} (optional)</span><div class="segmented severity" role="radiogroup" aria-label="${isNegative(type) ? 'Severity' : 'Strength'}">
-        ${['', 1, 2, 3, 4, 5].map((v) => `<label><input type="radio" name="sev" value="${v}" ${v === '' ? 'checked' : ''}><span class="${scaleClass(type, v)}"${scaleStyle(type, v)}>${v || '–'}<small>${v ? scaleLabels(type)[v] : 'Unknown'}</small></span></label>`).join('')}
+      ${mental ? `<div class="field"><span class="field-label">${esc(scale.name)} (optional)</span><div class="segmented severity" role="radiogroup" aria-label="${esc(scale.name)}">
+        ${scaleSteps(type, scale, 'sev', '')}
       </div></div>` : ''}
       <label class="field"><span>Details (optional)</span><textarea name="note" maxlength="${M.CONFIG.maxNoteLength}"></textarea></label>
       <div class="sheet-actions">
@@ -591,7 +609,7 @@ function logSheet(type) {
       const occurredAt = new Date(form.when.value).getTime();
       if (apply((s) => M.logEntry(s, { typeId: type.id, occurredAt, intensity, note: form.note.value }))) {
         closeSheet();
-        toast(`Logged ${type.name}${intensity ? `: ${scaleLabels(type)[intensity].toLowerCase()}` : ''}.`);
+        toast(`Logged ${type.name}${intensity ? `: ${stepText(scale, intensity)}` : ''}.`);
       }
     });
   });
@@ -615,6 +633,13 @@ function typeSheet(type = null) {
         <label><input type="radio" name="polarity" value="good" ${t.polarity === 'good' ? 'checked' : ''}><span>▲ Good mental health</span></label>
         <label><input type="radio" name="polarity" value="negative" ${t.polarity !== 'good' ? 'checked' : ''}><span>▼ Negative mental health</span></label>
       </div></div>
+      <div class="field" id="rating-field"><label class="field"><span>Rating name</span>
+          <input name="ratingName" maxlength="${M.CONFIG.maxRatingNameLength}" value="${esc(t.rating?.name ?? '')}" autocomplete="off"></label>
+        <p class="muted small" style="margin:-4px 0 10px">Shown above the 1–5 scale when you log this.</p>
+        <span class="field-label">Scale descriptions (optional)</span>
+        ${[1, 2, 3, 4, 5].map((n) => `<div class="rating-row"><span>${n}</span><input name="ratingLabel${n}" maxlength="${M.CONFIG.maxRatingLabelLength}" value="${esc(t.rating?.labels?.[n - 1] ?? '')}" placeholder="${RATING_EXAMPLES[n - 1]}" autocomplete="off" aria-label="Description for ${n}"></div>`).join('')}
+        <p class="muted small" style="margin-top:6px">Leave blank to show numbers only. <button type="button" class="link" data-act="reset-rating">Reset to defaults</button></p>
+      </div>
       <div class="field"><span class="field-label">Colour</span><div class="swatches">${swatches}</div></div>
       <div class="sheet-actions">
         ${!isNew && !type.isMeditation ? `<button type="button" class="danger" data-act="delete">Delete</button>` : ''}
@@ -624,9 +649,19 @@ function typeSheet(type = null) {
       </div></form>`, (el) => {
     const form = el.querySelector('form');
     const kindNow = () => form.querySelector('input[name=kind]:checked')?.value ?? t.kind;
-    const syncPolarity = () => { el.querySelector('#polarity-field').hidden = kindNow() !== 'mental_state'; };
-    form.querySelectorAll('input[name=kind]').forEach((r) => r.addEventListener('change', syncPolarity));
+    const polarityNow = () => form.querySelector('input[name=polarity]:checked')?.value ?? t.polarity;
+    const syncPolarity = () => {
+      const mental = kindNow() === 'mental_state';
+      el.querySelector('#polarity-field').hidden = !mental;
+      el.querySelector('#rating-field').hidden = !mental;
+      form.ratingName.placeholder = M.ratingOf({ polarity: polarityNow() }).name;
+    };
+    form.querySelectorAll('input[name=kind], input[name=polarity]').forEach((r) => r.addEventListener('change', syncPolarity));
     syncPolarity();
+    el.querySelector('[data-act=reset-rating]').addEventListener('click', () => {
+      form.ratingName.value = '';
+      for (let n = 1; n <= 5; n++) form[`ratingLabel${n}`].value = '';
+    });
     el.querySelector('[data-act=cancel]').addEventListener('click', closeSheet);
     el.querySelector('[data-act=delete]')?.addEventListener('click', async () => {
       if (used > 0) {
@@ -642,6 +677,10 @@ function typeSheet(type = null) {
         kind: kindNow(),
         polarity: form.querySelector('input[name=polarity]:checked')?.value,
         color: form.querySelector('input[name=color]:checked')?.value,
+        rating: {
+          name: form.ratingName.value,
+          labels: [1, 2, 3, 4, 5].map((n) => form[`ratingLabel${n}`].value),
+        },
       };
       const ok = isNew ? apply((s) => M.defineType(s, fields)) : apply((s) => M.editType(s, type.id, fields));
       if (ok) { closeSheet(); toast(isNew ? `Created ${M.normalizeName(fields.name)}.` : 'Saved.'); }
