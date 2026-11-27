@@ -22,6 +22,8 @@ config {
     max_warmup: Duration = 5.minutes
     max_type_name_length: Integer = 60
     max_note_length: Integer = 500
+    max_rating_name_length: Integer = 30
+    max_rating_label_length: Integer = 20
     min_intensity: Integer = 1
     max_intensity: Integer = 5
     future_entry_tolerance: Duration = 1.minute
@@ -56,6 +58,19 @@ external entity Person {}
 external entity Snapshot {}
 
 ------------------------------------------------------------
+-- Value types
+------------------------------------------------------------
+
+-- How a mental state's 1-5 intensity is named and described when it is
+-- logged: "Pull" with "Barely" ... "A lot", or "Severity" with numbers only.
+-- labels holds one description per step (config.min_intensity to
+-- config.max_intensity); a blank description shows the number alone.
+value Rating {
+    name: String
+    labels: List<String>
+}
+
+------------------------------------------------------------
 -- Entities
 ------------------------------------------------------------
 
@@ -63,6 +78,8 @@ entity EntryType {
     name: String
     kind: EntryKind
     polarity: Polarity?
+    -- The person's own naming of the 1-5 intensity; null means the defaults.
+    rating: Rating?
     colour: String
     archived: Boolean
     is_meditation: Boolean
@@ -70,6 +87,13 @@ entity EntryType {
     entries: Entry with type = this
 
     is_loggable: not archived
+
+    -- What the rating shows: the person's settings, falling back to
+    -- "Severity" ("Strength" for good states) with numbers only.
+    rating_name: if rating != null and rating.name != "": rating.name
+                 else if polarity = good: "Strength"
+                 else: "Severity"
+    rating_labels: if rating != null: rating.labels else: ["", "", "", "", ""]
 
     invariant PolarityOnlyForMentalStates {
         (kind = mental_state implies polarity != null)
@@ -79,6 +103,10 @@ entity EntryType {
     invariant MeditationIsAnActivity {
         is_meditation implies (kind = activity and not archived)
     }
+
+    invariant RatingOnlyForMentalStates {
+        rating != null implies kind = mental_state
+    }
 }
 
 entity Entry {
@@ -86,6 +114,9 @@ entity Entry {
     occurred_at: Timestamp
     duration: Duration?
     intensity: Integer?
+    -- The rating this entry was given under, kept so that later changes to
+    -- the type's rating never rewrite how earlier entries were rated.
+    scale: Rating?
     note: String?
     session: MeditationSession?
 
@@ -96,6 +127,10 @@ entity Entry {
     invariant IntensityInRange {
         intensity != null implies
             (intensity >= config.min_intensity and intensity <= config.max_intensity)
+    }
+
+    invariant ScaleGoesWithIntensity {
+        (scale != null) = (intensity != null)
     }
 }
 
@@ -137,27 +172,32 @@ entity MeditationSession {
 -- archived or deleted; Meditation can be renamed and recoloured only.
 
 default EntryType meditation = {
-    name: "Meditation", kind: activity, polarity: null,
+    name: "Meditation", kind: activity, polarity: null, rating: null,
     colour: "#7c9cff", archived: false, is_meditation: true
 }
 
 default EntryType met_friends = {
-    name: "Met friends", kind: activity, polarity: null,
+    name: "Met friends", kind: activity, polarity: null, rating: null,
     colour: "#5cc8a8", archived: false, is_meditation: false
 }
 
 default EntryType could_not_sleep = {
-    name: "Couldn't fall asleep", kind: mental_state, polarity: negative,
+    name: "Couldn't fall asleep", kind: mental_state, polarity: negative, rating: null,
     colour: "#e07a7a", archived: false, is_meditation: false
 }
 
+-- Rated by how strongly the thought pulled at the person, not how bad it was.
 default EntryType catastrophic_thoughts = {
     name: "Catastrophic thoughts", kind: mental_state, polarity: negative,
+    rating: {
+        name: "Pull",
+        labels: ["Barely", "A little", "Moderately", "Quite a bit", "A lot"]
+    },
     colour: "#d9a05b", archived: false, is_meditation: false
 }
 
 default EntryType felt_calm = {
-    name: "Felt calm", kind: mental_state, polarity: good,
+    name: "Felt calm", kind: mental_state, polarity: good, rating: null,
     colour: "#8fd16a", archived: false, is_meditation: false
 }
 
@@ -166,17 +206,21 @@ default EntryType felt_calm = {
 ------------------------------------------------------------
 
 rule DefineEntryType {
-    when: DefineEntryType(name, kind, polarity?, colour)
+    when: DefineEntryType(name, kind, polarity?, rating?, colour)
 
     requires: name.length > 0 and name.length <= config.max_type_name_length
     requires: not exists EntryType{name: name}
     requires: kind = mental_state implies polarity != null
+    requires: rating = null
+        or (rating.name.length <= config.max_rating_name_length
+            and rating.labels.all(l => l.length <= config.max_rating_label_length))
 
     ensures:
         EntryType.created(
             name: name,
             kind: kind,
             polarity: if kind = mental_state: polarity else: null,
+            rating: if kind = mental_state: rating else: null,
             colour: colour,
             archived: false,
             is_meditation: false
@@ -187,7 +231,7 @@ rule DefineEntryType {
 }
 
 rule EditEntryType {
-    when: EditEntryType(type, name, kind, polarity?, colour)
+    when: EditEntryType(type, name, kind, polarity?, rating?, colour)
 
     requires: name.length > 0 and name.length <= config.max_type_name_length
     requires: not exists EntryType{name: name} or EntryType{name: name} = type
@@ -196,12 +240,21 @@ rule EditEntryType {
     requires: kind = type.kind or type.entries.count = 0
     requires: not type.is_meditation or kind = activity
     requires: kind = mental_state implies polarity != null
+    requires: rating = null
+        or (rating.name.length <= config.max_rating_name_length
+            and rating.labels.all(l => l.length <= config.max_rating_label_length))
 
     ensures:
         type.name = name
         type.kind = kind
         type.polarity = if kind = mental_state: polarity else: null
+        -- A blank rating (no name, no descriptions) returns to the defaults.
+        type.rating = if kind = mental_state: rating else: null
         type.colour = colour
+
+    @guidance
+        -- Changing a rating affects entries logged from now on. Entries
+        -- already logged keep the scale they were rated under.
 }
 
 rule ArchiveEntryType {
@@ -249,7 +302,10 @@ rule LogEntry {
     ensures:
         Entry.created(
             type: type, occurred_at: occurred_at, duration: duration,
-            intensity: intensity, note: note, session: null
+            intensity: intensity, note: note, session: null,
+            scale: if intensity != null:
+                       Rating{name: type.rating_name, labels: type.rating_labels}
+                   else: null
         )
 }
 
@@ -267,6 +323,11 @@ rule EditEntry {
         entry.duration = duration
         entry.intensity = intensity
         entry.note = note
+        -- Editing keeps the scale the entry already had. An entry that gains
+        -- an intensity for the first time takes its type's current rating.
+        entry.scale = if intensity = null: null
+                      else if entry.scale != null: entry.scale
+                      else: Rating{name: entry.type.rating_name, labels: entry.type.rating_labels}
 }
 
 rule DeleteEntry {
@@ -363,6 +424,7 @@ rule LogFinishedMeditation {
                           session.planned_duration
                       else: session.elapsed,
             intensity: null,
+            scale: null,
             note: null,
             session: session
         )
@@ -457,7 +519,7 @@ surface Log {
     provides:
         for type in EntryTypes where is_loggable:
             LogEntry(type, occurred_at, duration, intensity, note)
-        DefineEntryType(name, kind, polarity, colour)
+        DefineEntryType(name, kind, polarity, rating, colour)
 
     @guidance
         -- Logging should be one tap plus an optional detail sheet.
@@ -484,7 +546,7 @@ surface ManageTypes {
 
     provides:
         for type in EntryTypes:
-            EditEntryType(type, name, kind, polarity, colour)
+            EditEntryType(type, name, kind, polarity, rating, colour)
             ArchiveEntryType(type)
             RestoreEntryType(type)
             DeleteEntryType(type)
@@ -520,6 +582,12 @@ deferred Snapshot.is_valid       -- see: src/model.js importState
 deferred Snapshot.replace_all    -- see: src/model.js importState
 
 -- Decided 2026-11-13: intensity stays descriptive only (see Insights).
+-- Decided 2026-11-27: every mental state names its own 1-5 rating and may
+-- describe its steps (the type's `rating`). Without settings it is
+-- "Severity" ("Strength" for good states), numbers only. Each rated entry
+-- keeps the scale it was logged under (`scale`), so changing a rating never
+-- rewrites history. "Catastrophic thoughts" ships as "Pull" because naming the
+-- thought's severity risks making it feel more significant.
 -- Decided 2026-11-13: no sync; data stays on one device, and Export/Import
 -- is the only way to move it.
 -- Decided 2026-11-14: no reminders; Pawsterior never prompts the person to
