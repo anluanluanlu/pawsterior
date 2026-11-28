@@ -470,6 +470,11 @@ setInterval(() => {
   }
 }, 500);
 
+sound.onSamplesReady = () => {
+  const s = state.session;
+  if (s?.status === 'running' && sound.ready) sound.scheduleSession(s, M.sessionRawElapsed(s));
+};
+
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible' && state.session?.status === 'running') requestWakeLock();
 });

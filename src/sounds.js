@@ -28,6 +28,11 @@ export class SoundEngine {
     this.ambient = null;
     this.scheduled = new Set();
     this.samples = null;
+    this.onSamplesReady = null;
+    // Download the recordings up front (no AudioContext needed), so on a slow
+    // connection they are already here by the time the first gesture unlocks audio.
+    this.raw = Object.fromEntries(Object.entries(SAMPLE_URLS).map(([kind, url]) =>
+      [kind, fetch(url).then((r) => r.arrayBuffer()).catch(() => null)]));
   }
 
   get ready() {
@@ -65,7 +70,7 @@ export class SoundEngine {
     } catch { /* ignore */ }
     // Wait (briefly) for the recordings: the end gong is scheduled when the session
     // starts, so if they weren't decoded yet the synthesised fallback would be locked in.
-    await Promise.race([this.loadSamples(), new Promise((r) => setTimeout(r, 3000))]);
+    await Promise.race([this.loadSamples(), new Promise((r) => setTimeout(r, 8000))]);
     return this.ready;
   }
 
@@ -74,13 +79,18 @@ export class SoundEngine {
     if (this.samplesLoading) return this.samplesLoading;
     if (!this.ctx) return Promise.resolve();
     this.samples = {};
-    this.samplesLoading = Promise.all(Object.entries(SAMPLE_URLS).map(([kind, url]) =>
-      fetch(url)
-        .then((r) => r.arrayBuffer())
-        // Callback form: older iOS Safari has no promise-returning decodeAudioData.
-        .then((data) => new Promise((res, rej) => this.ctx.decodeAudioData(data, res, rej)))
+    this.samplesLoading = Promise.all(Object.keys(SAMPLE_URLS).map((kind) =>
+      this.raw[kind]
+        .then((data) => {
+          if (!data) throw new Error('not downloaded');
+          // Callback form: older iOS Safari has no promise-returning decodeAudioData.
+          return new Promise((res, rej) => this.ctx.decodeAudioData(data, res, rej));
+        })
         .then((buf) => { this.samples[kind] = buf; })
-        .catch(() => { /* keep the synthesised fallback */ })));
+        .catch(() => { /* keep the synthesised fallback */ })))
+      // If the recordings arrived after bells were already scheduled with the
+      // synthesised fallback, let the app reschedule them with the real ones.
+      .then(() => { this.onSamplesReady?.(); });
     return this.samplesLoading;
   }
 
