@@ -130,5 +130,5 @@ index.html, styles.css   shell and styles (light and dark)
 sw.js, manifest.webmanifest, icons/   PWA: offline and installable
 tools/serve.mjs          zero-dependency dev server
 tools/build.mjs          builds dist/ (real app) and dist/test/ (test build)
-tools/make-icons.mjs     regenerates the PNG icons from the paw geometry
+icons/logo-source.png      source cat logo the app icons were generated from
 ```

@@ -8,8 +8,7 @@
     "start": "node tools/serve.mjs",
     "test": "node --test test/insights.test.js test/model.test.js test/worker.test.js test/sync.test.js",
     "build": "node tools/build.mjs",
-    "spec": "allium analyse spec/pawsterior.allium",
-    "icons": "node tools/make-icons.mjs"
+    "spec": "allium analyse spec/pawsterior.allium"
   },
   "engines": {
     "node": ">=20"
