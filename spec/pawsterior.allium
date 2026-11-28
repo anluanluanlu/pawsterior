@@ -191,7 +191,7 @@ default EntryType catastrophic_thoughts = {
     name: "Catastrophic thoughts", kind: mental_state, polarity: negative,
     rating: {
         name: "Pull",
-        labels: ["Barely", "A little", "Moderately", "Quite a bit", "A lot"]
+        labels: ["Barely", "A little", "Moderate", "Quite a bit", "A lot"]
     },
     colour: "#d9a05b", archived: false, is_meditation: false
 }

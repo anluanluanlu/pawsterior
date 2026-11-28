@@ -207,7 +207,7 @@ test('ratings: defaults, per-type names and descriptions, and entries keep the s
   const cat = byName(s, 'Catastrophic thoughts');
   assert.deepEqual(M.ratingOf(sleep), { name: 'Severity', labels: ['', '', '', '', ''] });
   assert.equal(M.ratingOf(byName(s, 'Felt calm')).name, 'Strength');
-  assert.deepEqual(M.ratingOf(cat), { name: 'Pull', labels: ['Barely', 'A little', 'Moderately', 'Quite a bit', 'A lot'] });
+  assert.deepEqual(M.ratingOf(cat), { name: 'Pull', labels: ['Barely', 'A little', 'Moderate', 'Quite a bit', 'A lot'] });
 
   s = M.logEntry(s, { typeId: cat.id, occurredAt: T0, intensity: 3 }, T0);
   s = M.editType(s, cat.id, { rating: { name: ' Weight ', labels: ['', '', '', '', 'Huge'] } });
@@ -242,4 +242,14 @@ test('older saves: Catastrophic thoughts gets Pull once, and rated entries keep 
   assert.equal(M.migrateLegacy(cleared), cleared, 'a rating the user cleared is not put back');
   const back = M.importState(M.exportState(migrated, T0));
   assert.deepEqual(back.entries[0].scale, migrated.entries[0].scale);
+});
+
+test('a save that already has the first Pull wording gets "Moderate"', () => {
+  const s = M.createInitialState(T0);
+  const cat = byName(s, 'Catastrophic thoughts');
+  cat.rating = { name: 'Pull', labels: ['Barely', 'A little', 'Moderately', 'Quite a bit', 'A lot'] };
+  const fixed = M.migrateLegacy(s);
+  assert.deepEqual(byName(fixed, 'Catastrophic thoughts').rating.labels, ['Barely', 'A little', 'Moderate', 'Quite a bit', 'A lot']);
+  cat.rating = { name: 'Pull', labels: ['', '', 'My own', '', ''] };
+  assert.equal(M.migrateLegacy(s), s, 'the person\'s own wording is left alone');
 });

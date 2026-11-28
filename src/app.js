@@ -113,7 +113,7 @@ const polarityBadge = (t) => t.kind === 'mental_state'
 // Every mental state can be rated 1-5. Each type names its own rating ("Severity", "Pull", ...) and
 // can describe the steps; by default that is "Severity" (or "Strength" for good states), numbers only.
 /** Example descriptions shown as placeholders in the rating editor. */
-const RATING_EXAMPLES = ['Barely', 'A little', 'Moderately', 'Quite a bit', 'A lot'];
+const RATING_EXAMPLES = ['Barely', 'A little', 'Moderate', 'Quite a bit', 'A lot'];
 const isNegative = (t) => t?.kind === 'mental_state' && t.polarity === 'negative';
 const isMental = (t) => t?.kind === 'mental_state';
 /** The rating an entry was logged under (its own snapshot), else the type's current one. */

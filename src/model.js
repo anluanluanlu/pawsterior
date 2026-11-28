@@ -7,7 +7,7 @@ export const POLARITIES = ['good', 'negative'];
 
 /** Rating given to "Catastrophic thoughts" (one-off): how strongly the thought pulled, not how bad it was. */
 const CATASTROPHIC_RATING = Object.freeze({
-  name: 'Pull', labels: Object.freeze(['Barely', 'A little', 'Moderately', 'Quite a bit', 'A lot']),
+  name: 'Pull', labels: Object.freeze(['Barely', 'A little', 'Moderate', 'Quite a bit', 'A lot']),
 });
 
 /** The fixed descriptions older versions showed, so earlier entries keep the wording they were rated under. */
@@ -30,6 +30,10 @@ export function migrateLegacy(s) {
     if (n.polarity === 'bad') n = { ...n, polarity: 'negative' };
     if (n.rating === undefined && n.kind === 'mental_state' && n.name === 'Catastrophic thoughts') {
       n = { ...n, rating: { name: CATASTROPHIC_RATING.name, labels: [...CATASTROPHIC_RATING.labels] } };
+    }
+    // "Moderately" was shortened to "Moderate" to fit the button; update saves that already got the first wording.
+    if (n.name === 'Catastrophic thoughts' && n.rating?.name === 'Pull' && n.rating.labels?.[2] === 'Moderately') {
+      n = { ...n, rating: { ...n.rating, labels: n.rating.labels.map((l, i) => (i === 2 ? 'Moderate' : l)) } };
     }
     if (n !== t) changed = true;
     return n;
